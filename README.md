@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.2.3.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.4.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Native expressions
 
@@ -49,7 +49,7 @@ The notation panel shows the entered text, canonical short form, readable long f
 
 An optional `|` attaches a one-line interpretation table to a numeric expression. Each semicolon-separated rule is `condition:text`. Conditions may be an exact number (`7`), an inclusive range (`7-9`), a maximum (`6-` or `<=6`), or a minimum (`10+` or `>=10`); `<` and `>` are also supported. Rules are tested in written order, so the first match wins. A gap leaves the numeric result without an interpretation. Labels are literal text: `d6` or arithmetic inside a label is never rolled or evaluated. The ledger and reveal show both the numeric result and any matched label, while the probability chart remains the distribution of numeric results. Symbolic and explicit pool results cannot use a numeric interpretation table.
 
-The Roll20 dialect selector supports common `NdM`, arithmetic, parentheses, `khN`, `klN`, `dhN`, `dlN`, `r` and `ro` with numeric comparisons, and `!`. For example, `2d20kh1+5`, `4d6dl1`, and `d6ro=1`. This is an adapter into the same AST, not a second evaluator. Roll20 success counting and unusual modifier combinations are future work.
+The input automatically accepts common Roll20 `NdM`, arithmetic, parentheses, `khN`, `klN`, `dhN`, `dlN`, `r` and `ro` with numeric comparisons, and `!`. For example, `2d20kh1+5`, `4d6dl1`, and `d6ro=1`. Native notation is preferred when both parsers accept an expression; Roll20 compatibility is an adapter into the same AST, not a second evaluator. Existing ledger entries retain their recorded dialect when reopened. Roll20 success counting and unusual modifier combinations are future work.
 
 ## Probability and rolls
 
@@ -57,13 +57,13 @@ Valid expressions are parsed 150 ms after typing stops, then evaluated in a Web 
 
 **Calculate fairness** starts repeated local rolls of the current expression in a separate Web Worker. Teal bars show the accumulating observed frequencies beside the expected distribution, with the sample count beneath the chart. **Stop** preserves the observed bars for inspection. Starting again resets the sample, and editing the expression clears it. These samples do not create ledger entries, broadcast messages, or saved history. If samples produce outcomes outside the 80 visible chart bars, their count is shown below the chart.
 
-Rolls added to the ledger while an expression is active leave muted count markers at their outcomes on the distribution chart; the latest local result remains highlighted. Matching shared rolls count too. Changing the expression or dialect clears these chart markers and recalculates the distribution. The ledger itself remains available for rerolls and editing.
+Rolls added to the ledger while an expression is active leave muted count markers at their outcomes on the distribution chart; the latest local result remains highlighted. Matching shared rolls count too. Changing the expression clears these chart markers and recalculates the distribution. The ledger itself remains available for rerolls and editing.
 
 Roll randomness uses `crypto.getRandomValues` with rejection sampling to avoid modulo bias. The engine accepts an injected RNG for deterministic tests. Unlimited explosions and rerolls have a defensive 100-step limit per die. Every roll also shares a 20,000-step work budget across nested facet expressions and draws, plus a nesting limit of 100. Hitting a limit produces a clear error instead of hanging. Statically certain infinite loops, including `d{1!}` and rerolling every possible face, are rejected before evaluation. The safety limits can reject an exceptionally long but theoretically terminating run; they never clamp or silently change its result.
 
 ## Roll reveal
 
-Each permitted roll opens a separate result popover near the bottom right of every recipient's Owlbear window, even if their ledger action is closed. The canonical short expression appears immediately. Each following line starts as a translucent copy of the previous one and moves down; unchanged text stays in place while the changing terms crossfade. Each line spans the popover and centers its text, so a longer replacement does not wrap while its term expands. The final **RESULT:** grows into notification blue. For example, `2d6+2` can become `[2, 3] + 2`, then `5 + 2`, then `RESULT: 7`. Steps arrive one second apart. Reduced-motion settings remove movement and fades but keep the one-second spacing. The evaluator records these reductions from the AST during the same roll. The ledger's **Show work** section uses the same steps; older saved rolls retain their earlier receipts. Intermediate lines may be shortened; the final result is never truncated. The popover remains until its dismiss button is pressed or another roll replaces it. The background page listens for everyone rolls, the sender's local self rolls, and encrypted GM rolls; it does not send private results to other players. The `background_url` manifest entry is required for this behavior.
+Each permitted roll opens a separate result popover near the bottom right of every recipient's Owlbear window, even if their ledger action is closed. A compact distribution chart above the steps is calculated locally in a worker for that expression. It has one gapless bar per outcome, each at least one pixel wide, with rounded top corners where space allows; large distributions scroll horizontally. The current outcome turns gold only after the final result appears. The canonical short expression appears immediately. Each following line starts as a translucent copy of the previous one and moves down; unchanged text stays in place while the changing terms crossfade. Each line spans the popover and centers its text, so a longer replacement does not wrap while its term expands. The final **RESULT:** grows into notification blue. For example, `2d6+2` can become `[2, 3] + 2`, then `5 + 2`, then `RESULT: 7`. Steps arrive one second apart. Reduced-motion settings remove movement and fades but keep the one-second spacing. The evaluator records these reductions from the AST during the same roll. The ledger's **Show work** section uses the same steps; older saved rolls retain their earlier receipts. Intermediate lines may be shortened; the final result is never truncated. The popover remains until its dismiss button is pressed or another roll replaces it. The background page listens for everyone rolls, the sender's local self rolls, and encrypted GM rolls; it does not send private results to other players. The `background_url` manifest entry is required for this behavior.
 
 ## Multiplayer and privacy
 
@@ -71,29 +71,75 @@ Everyone rolls are broadcast as versioned events and appear in open No Dice ledg
 
 The extension is available to all players. Room metadata contains only the GM public key. The sender's own private roll is stored locally; other players see only encrypted GM payloads. As with any client extension, the result protocol does not provide a server trust guarantee against a malicious client forging messages.
 
-## Integration API
+## Calling No Dice from another Owlbear Rodeo extension
 
-Channels are derived from `com.ex-asperis.no-dice`:
+No Dice API v1 uses [LOCAL Owlbear broadcasts](https://docs.owlbear.rodeo/extensions/apis/broadcast/). No Dice must be installed and enabled for the same room and local user. Its background page listens even when its action popover is closed. Each request rolls once and receives a compact response on the matching `requestId`; the API does not expose its AST or evaluation trace.
 
 ```ts
-const REQUEST_CHANNEL = 'com.ex-asperis.no-dice/roll-request/v1';
-const RESULT_CHANNEL = 'com.ex-asperis.no-dice/roll-result/v1';
+export const NO_DICE_API_REQUEST = 'com.ex-asperis.no-dice/api/request';
+export const NO_DICE_API_RESPONSE = 'com.ex-asperis.no-dice/api/response';
 
-type RollRequest = {
-  version: 1;
+export interface NoDiceRollRequestV1 {
+  protocolVersion: 1;
+  type: 'roll';
   requestId: string;
   expression: string;
-  dialect?: 'nodice' | 'roll20';
-  visibility?: 'everyone' | 'self' | 'gm';
-  label?: string;
-  source?: string;
-};
+  options?: { record?: boolean; label?: string };
+}
+export type NoDicePublicValue =
+  | { kind: 'number'; value: number }
+  | { kind: 'text'; value: string }
+  | { kind: 'pool'; values: (number | string)[] };
+export type NoDiceRollResponseV1 =
+  | { protocolVersion: 1; type: 'rollResult'; requestId: string; ok: true;
+      expression: { input: string; short: string; long: string };
+      result: NoDicePublicValue; display: string }
+  | { protocolVersion: 1; type: 'rollResult'; requestId: string; ok: false;
+      error: { code: 'INVALID_REQUEST' | 'UNSUPPORTED_VERSION' | 'PARSE_ERROR'
+        | 'VALIDATION_ERROR' | 'EVALUATION_ERROR'; message: string;
+        start?: number; end?: number } };
 ```
 
-Broadcast a `RollRequest` on the request channel. A GM with No Dice open evaluates it through the normal parser and evaluator. Everyone results or errors are broadcast on the result channel using the `RollResult` type in `src/protocol.ts`. Self requests are evaluated locally by the GM. GM requests are currently ignored on the public request channel because their expression would be exposed to every client; use a private integration in a future protocol version. Keep requests below 1,000 characters and use unique request IDs. External callers should subscribe to the result channel before sending.
+Native notation is tried first, then Roll20 compatibility if native parsing fails. `expression.input` preserves the original input; `short` and `long` are the existing canonical short and readable long forms. `result` can be numeric, symbolic text, or an explicit pool. If a numeric roll matches a `|` interpretation rule, `result` is the interpretation text and `display` includes both number and text (for example, `7 · Partial success`). The internal roll record still retains the numeric value. Quoted interpretation labels such as `7-9:"Partial success"` return the text without quote marks.
+
+`record` defaults to `true`: the roll uses No Dice's normal **Everyone** result channel, local history, and reveal display. It does not open the action popover or take focus. Set `record:false` to receive only the LOCAL API response, with no ledger or reveal entry. `label` is optional context shown with a recorded roll; it never changes evaluation or identifies the caller. Expression length is limited to 1,000 characters and labels to 200 characters. API responses and recorded broadcasts stay under a 12 KB payload budget; unusually long traces may be shortened, and oversized results receive an error. Unknown optional fields are ignored. Repeated request IDs reuse the first roll within the background page's recent request cache. A caller should generate a fresh UUID for every new roll.
+
+Copy this caller pattern into another extension. Subscribe before sending; ignore unrelated responses; clean up on response, send failure, or timeout. A timeout means No Dice is unavailable or did not respond, so there is no need to query the installed extension list first.
+
+```ts
+import OBR from '@owlbear-rodeo/sdk';
+
+const requestId = crypto.randomUUID();
+const response = await new Promise<NoDiceRollResponseV1>((resolve, reject) => {
+  let done = false;
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let unsubscribe = () => {};
+  const finish = (action: () => void) => {
+    if (done) return;
+    done = true;
+    if (timer) clearTimeout(timer);
+    unsubscribe();
+    action();
+  };
+  unsubscribe = OBR.broadcast.onMessage(NO_DICE_API_RESPONSE, event => {
+    const data = event.data as NoDiceRollResponseV1;
+    if (data?.protocolVersion !== 1 || data.type !== 'rollResult' || data.requestId !== requestId) return;
+    finish(() => data.ok ? resolve(data) : reject(new Error(data.error.message)));
+  });
+  timer = setTimeout(() => finish(() => reject(new Error('No Dice did not respond'))), 3000);
+  void OBR.broadcast.sendMessage(NO_DICE_API_REQUEST, {
+    protocolVersion: 1, type: 'roll', requestId,
+    expression: 'H[2d20]+5',
+    options: { record: true, label: 'Longsword attack' },
+  } satisfies NoDiceRollRequestV1, { destination: 'LOCAL' })
+    .catch(error => finish(() => reject(error)));
+});
+```
+
+A matching copyable helper is in `src/noDiceClient.ts`; the public message types and constants are in `src/noDiceApi.ts`. The earlier GM relay channels (`com.ex-asperis.no-dice/roll-request/v1` and `/roll-result/v1`) remain available for existing integrations but have different room-wide behavior. New local integrations should use the API v1 channels above.
 
 ## Architecture
 
-`src/engine/tokenizer.ts` creates tokens with source spans. `parser.ts` turns tokens into the semantic AST in `ast.ts` and retains the original source in `parseDocument`; `interpretation.ts` parses and matches literal result tables as a separate AST node. A dice node stores its quantity, standard or custom die, and `inferred`/`pool`/`sum` mode. Custom facets are AST values, expressions, or text templates with embedded expression segments. `semantics.ts` resolves inferred modes by context in a separate pass without changing that AST, including nested facet expressions. `validate.ts` reports structured static diagnostics before rolling. `evaluate.ts` chooses a facet before evaluating its expression and builds trace steps; interpretation is applied only after the numeric value is known. `probability.ts` computes exact PMFs by mixing facet distributions independently of the random evaluator and falls back to sampling for large or unbounded cases. `format.ts` independently serializes short, readable long, and expanded long notation from the AST. `probability.worker.ts` keeps distribution work off the UI thread. `protocol.ts`, `gmCrypto.ts`, and `persistence.ts` keep room transport and local history separate from dice semantics. `App.tsx` renders the chart, ledger, notation, and input.
+`src/engine/tokenizer.ts` creates tokens with source spans. `parser.ts` turns tokens into the semantic AST in `ast.ts` and retains the original source in `parseDocument`; `interpretation.ts` parses and matches literal result tables as a separate AST node. A dice node stores its quantity, standard or custom die, and `inferred`/`pool`/`sum` mode. Custom facets are AST values, expressions, or text templates with embedded expression segments. `semantics.ts` resolves inferred modes by context in a separate pass without changing that AST, including nested facet expressions. `validate.ts` reports structured static diagnostics before rolling. `evaluate.ts` chooses a facet before evaluating its expression and builds trace steps; interpretation is applied only after the numeric value is known. `probability.ts` computes exact PMFs by mixing facet distributions independently of the random evaluator and falls back to sampling for large or unbounded cases. `format.ts` independently serializes short, readable long, and expanded long notation from the AST. `probability.worker.ts` keeps distribution work off the UI thread. `rollService.ts` is the shared application roll pipeline for the UI and public API. `noDiceApi.ts` defines the versioned external contract, `noDiceApiHandler.ts` validates and deduplicates requests, and `background.ts` owns its sole OBR listener. `protocol.ts`, `gmCrypto.ts`, and `persistence.ts` keep room transport and local history separate from dice semantics. `App.tsx` renders the chart, ledger, notation, and input.
 
-Dynamic forms such as `H(d4)[5d6]` and `(d4)d(d{4,6,8})` are supported; each structural parameter is rolled once. Pool selectors share one AST abstraction for future operations. Future work includes exact algorithms for larger keep/drop distributions, persistent event reception when the popover is closed, richer Roll20 compatibility, and a background receiver for integrations.
+Dynamic forms such as `H(d4)[5d6]` and `(d4)d(d{4,6,8})` are supported; each structural parameter is rolled once. Pool selectors share one AST abstraction for future operations. Future work includes exact algorithms for larger keep/drop distributions and richer Roll20 compatibility.

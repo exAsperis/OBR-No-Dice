@@ -189,3 +189,11 @@ export function parseSyntax(source:string,dialect:Dialect='nodice'):ParsedDocume
 }
 export function parseDocument(source:string,dialect:Dialect='nodice'):ParsedDocument{const document=parseSyntax(source,dialect);document.diagnostics=validate(document.ast);return document;}
 export function parse(source:string,dialect:Dialect='nodice'):Node{const document=parseDocument(source,dialect);const error=document.diagnostics[0];if(error)throw new ExpressionError(`${error.message} at position ${error.start+1}`,false,error);return document.ast;}
+/** Prefer native syntax; use the Roll20 adapter only when it accepts an otherwise invalid input. */
+export function parseAuto(source:string):{ast:Node;dialect:Dialect}{
+  try{return {ast:parse(source,'nodice'),dialect:'nodice'};}
+  catch(nativeError){
+    try{return {ast:parse(source,'roll20'),dialect:'roll20'};}
+    catch{throw nativeError;}
+  }
+}

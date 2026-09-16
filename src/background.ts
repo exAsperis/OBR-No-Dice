@@ -2,6 +2,10 @@ import OBR from '@owlbear-rodeo/sdk';
 import { decryptForGm, publishGmKey } from './gmCrypto';
 import { GM_CHANNEL, isResult, RESULT_CHANNEL, type EncryptedResult, type RollResult } from './protocol';
 import { isLocalMessage, LOCAL_CHANNEL, REVEAL_POPOVER_ID, type LocalMessage } from './revealProtocol';
+import { MAX_API_BROADCAST_BYTES, NO_DICE_API_REQUEST, NO_DICE_API_RESPONSE } from './noDiceApi';
+import { createNoDiceApiHandler } from './noDiceApiHandler';
+import { rollExpression } from './rollService';
+import { appendHistory } from './persistence';
 
 OBR.onReady(async () => {
   const roomId = OBR.room.id;
@@ -81,4 +85,23 @@ OBR.onReady(async () => {
       present(result);
     }).catch(() => {});
   });
+  const handleApiRequest = createNoDiceApiHandler({
+    roll: async (expression, requestId, label) => rollExpression({
+      requestId, expression, visibility: 'everyone', playerId,
+      playerName: await OBR.player.getName(), label, source: 'external-api',
+    }),
+    record: async completed => {
+      const record = { ...completed.record, trace: [...completed.record.trace], steps: [...(completed.record.steps ?? [])] };
+      const size = () => new TextEncoder().encode(JSON.stringify(record)).length;
+      while (size() > MAX_API_BROADCAST_BYTES && (record.trace.length || record.steps.length)) {
+        if (record.trace.length >= record.steps.length) record.trace.pop();
+        else record.steps.pop();
+      }
+      if (size() > MAX_API_BROADCAST_BYTES) throw new Error('Roll record is too large for an Owlbear broadcast');
+      appendHistory(roomId, playerId, record);
+      await OBR.broadcast.sendMessage(RESULT_CHANNEL, record, { destination: 'ALL' });
+    },
+    respond: response => OBR.broadcast.sendMessage(NO_DICE_API_RESPONSE, response, { destination: 'LOCAL' }),
+  });
+  OBR.broadcast.onMessage(NO_DICE_API_REQUEST, event => { void handleApiRequest(event.data); });
 });

@@ -54,7 +54,9 @@ export function parseInterpretationTable(source: string, offset = 0): Interpreta
     const condition = parseInterpretationCondition(source.slice(start, colon), offset + start);
     const end = source.indexOf(';', colon + 1);
     const labelEnd = end < 0 ? source.length : end;
-    const label = source.slice(colon + 1, labelEnd).trim();
+    const rawLabel = source.slice(colon + 1, labelEnd).trim();
+    const label = rawLabel.length >= 2 && rawLabel.startsWith('"') && rawLabel.endsWith('"')
+      ? rawLabel.slice(1, -1) : rawLabel;
     if (!label) fail('Expected interpretation text', 'EMPTY_INTERPRETATION_LABEL', offset + colon + 1, offset + labelEnd, end < 0);
     rules.push({ condition, label, span: { start: offset + start, end: offset + labelEnd } });
     cursor = labelEnd + 1;

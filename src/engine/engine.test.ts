@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { parse } from './parser';
+import { parse, parseAuto } from './parser';
 import { evaluate, roll, type Rng } from './evaluate';
 import { distribution } from './probability';
 
@@ -38,6 +38,13 @@ describe('No Dice engine',()=>{
     expect(roll(parse('4d6dl1','roll20'),fixed(5,3,2,0)).value).toBe(13);
     expect(roll(parse('3d8+4','roll20'),fixed(0,1,2)).value).toBe(10);
     expect(roll(parse('1d20-2','roll20'),fixed(19)).value).toBe(18);
+  });
+  it('automatically chooses native notation first and Roll20 modifiers when needed',()=>{
+    expect(parseAuto('2d6').dialect).toBe('nodice');
+    expect(parseAuto('H2[3d4]').dialect).toBe('nodice');
+    expect(parseAuto('2d20kh1+5').dialect).toBe('roll20');
+    expect(roll(parseAuto('4d6dl1').ast,fixed(5,3,2,0)).value).toBe(13);
+    expect(()=>parseAuto('H3[2d8]')).toThrow();
   });
   it('shows explosions and rerolls',()=>{
     const exploded=roll(parse('d6!','roll20'),fixed(5,5,3));expect(exploded.value).toBe(16);expect(exploded.trace.filter(s=>s.startsWith('explode'))).toHaveLength(2);
