@@ -5,6 +5,7 @@ import { parse } from './engine/parser';
 import { roll, type Value } from './engine/evaluate';
 import type { Dialect } from './engine/ast';
 import type { Distribution } from './engine/probability';
+import type { FairnessSnapshot } from './engine/fairness';
 import { useOwlbear } from './hooks/useOwlbear';
 import { loadHistory, saveHistory } from './persistence';
 import { decryptForGm, encryptForGm, publishGmKey } from './gmCrypto';
@@ -19,15 +20,23 @@ export default function App() {
   const [history,setHistory]=useState<RollResult[]>([]);
   const [chart,setChart]=useState<Distribution|null>(null);
   const [chartError,setChartError]=useState('');
+  const [fairness,setFairness]=useState<FairnessSnapshot|null>(null);
+  const [fairnessRunning,setFairnessRunning]=useState(false);
+  const [fairnessError,setFairnessError]=useState('');
   const [notation,setNotation]=useState<{short:string;longReadable:string;longExpanded:string}|null>(null);
   const [inputError,setInputError]=useState('');
   const [selected,setSelected]=useState<RollResult|null>(null);
+  const [chartRolls,setChartRolls]=useState<Value[]>([]);
   const [busy,setBusy]=useState(false);
   const worker=useRef<Worker|null>(null);
+  const fairnessWorker=useRef<Worker|null>(null);
+  const fairnessId=useRef(0);
   const gmKey=useRef<CryptoKey|null>(null);
   const sequence=useRef(0);
   const historyRef=useRef<RollResult[]>([]);
-  const add=(result:RollResult)=>{ if(historyRef.current.some(x=>x.requestId===result.requestId)) return; const next=[...historyRef.current,result].slice(-100); historyRef.current=next; setHistory(next); };
+  const currentInput=useRef({expression,dialect});
+  currentInput.current={expression,dialect};
+  const add=(result:RollResult)=>{ if(historyRef.current.some(x=>x.requestId===result.requestId)) return; const next=[...historyRef.current,result].slice(-100); historyRef.current=next; setHistory(next); if(!result.error&&result.expression===currentInput.current.expression&&result.dialect===currentInput.current.dialect)setChartRolls(previous=>[...previous,result.value]); };
   useEffect(()=>{ if(!obr.roomId||!obr.playerId)return; const stored=loadHistory(obr.roomId,obr.playerId); historyRef.current=stored; setHistory(stored); },[obr.roomId,obr.playerId]);
   useEffect(()=>{ if(obr.roomId&&obr.playerId)saveHistory(obr.roomId,obr.playerId,history); },[history,obr.roomId,obr.playerId]);
   useEffect(()=>{
@@ -36,7 +45,19 @@ export default function App() {
     return ()=>{w.terminate();worker.current=null;};
   },[]);
   useEffect(()=>{
+    const w=new Worker(new URL('./fairness.worker.ts',import.meta.url),{type:'module'}); fairnessWorker.current=w;
+    w.onmessage=(event:MessageEvent<{id:number;type:'snapshot'|'error';snapshot?:FairnessSnapshot;running?:boolean;error?:string}>)=>{
+      if(event.data.id!==fairnessId.current)return;
+      if(event.data.type==='snapshot') { setFairness(event.data.snapshot??null); setFairnessRunning(Boolean(event.data.running)); }
+      else { setFairnessError(event.data.error??'Sampling failed'); setFairnessRunning(false); }
+    };
+    return ()=>{w.terminate();fairnessWorker.current=null;};
+  },[]);
+  useEffect(()=>{
     const id=++sequence.current; setChart(null); setNotation(null); setChartError('');
+    setChartRolls([]);setSelected(null);
+    const previous=fairnessId.current++; fairnessWorker.current?.postMessage({type:'stop',id:previous});
+    setFairness(null); setFairnessRunning(false); setFairnessError('');
     if(!expression.trim())return;
     const t=window.setTimeout(()=>worker.current?.postMessage({id,expression,dialect}),150);
     return ()=>window.clearTimeout(t);
@@ -71,16 +92,26 @@ export default function App() {
     finally {setBusy(false);}
   }
   function submit() { void perform({version:1,requestId:crypto.randomUUID(),expression,dialect,visibility},true); }
+  function toggleFairness() {
+    if(fairnessRunning){fairnessWorker.current?.postMessage({type:'stop',id:fairnessId.current});setFairnessRunning(false);return;}
+    const id=++fairnessId.current;
+    setFairness(null);setFairnessError('');setFairnessRunning(true);
+    fairnessWorker.current?.postMessage({type:'start',id,expression,dialect});
+  }
   if(obr.status==='connecting')return <StatusPanel title="Connecting to Owlbear Rodeo" message="Waiting for room access…"/>;
   if(obr.status==='error')return <StatusPanel title="No Dice unavailable" message={obr.error??'Could not connect to Owlbear Rodeo'} onRetry={()=>void obr.refresh()}/>;
   const max=Math.max(0,...(chart?.entries.map(x=>x.probability)??[]));
+  const fairCounts=new Map(fairness?.counts.map(item=>[JSON.stringify(item.value),item.count])??[]);
+  const historicCounts=new Map<string,number>();
+  for(const value of chartRolls){const key=JSON.stringify(value);historicCounts.set(key,(historicCounts.get(key)??0)+1);}
+  const shownFair=chart?.entries.slice(0,80).reduce((sum,item)=>sum+(fairCounts.get(JSON.stringify(item.value))??0),0)??0;
   return <main className="no-dice">
     <header><div><div className="eyebrow">NO DICE <span>· PROBABILITY & RECEIPTS</span></div><h1>Roll ledger</h1></div><div className="identity">{obr.playerName??'Player'}<small>{obr.role??''}</small></div></header>
     <section className="probability" aria-label="Probability distribution">
       <div className="section-heading"><strong>Distribution</strong><span>{chart?(chart.exact?'Exact distribution':`≈ Estimated from ${chart.trials?.toLocaleString()} trials`):chartError?'Unavailable':'Enter an expression'}</span></div>
-      {chart&&<><div className="bars" role="img" aria-label="Probability mass chart">{chart.entries.slice(0,80).map((entry,i)=><div className={`bar-cell ${selected?.expression===expression&&display(selected.value)===display(entry.value)?'actual':''}`} key={i} title={`${display(entry.value)}: ${(entry.probability*100).toFixed(3)}%`}><div className="bar" style={{height:`${Math.max(3,entry.probability/max*100)}%`}}/><small>{display(entry.value)}</small></div>)}</div><div className="stats"><span>{chart.range?`Range ${chart.range[0]}–${chart.range[1]}`:`${chart.entries.length} outcomes`}</span>{chart.mean!==undefined&&<span>Mean {chart.mean.toFixed(2)}</span>}<span>Mode {display(chart.mode??'—')}</span></div></>}
+      {chart&&<><div className="bars" role="img" aria-label="Probability mass chart with roll history and fairness overlay">{chart.entries.slice(0,80).map((entry,i)=>{const valueKey=JSON.stringify(entry.value),observed=fairCounts.get(valueKey)??0,historic=historicCounts.get(valueKey)??0;const observedRate=fairness?.total?observed/fairness.total:0;return <div className={`bar-cell ${selected?.expression===expression&&selected.dialect===dialect&&display(selected.value)===display(entry.value)?'actual':''}`} key={i} title={`${display(entry.value)}: expected ${(entry.probability*100).toFixed(3)}%; ledger rolls ${historic}; fairness ${fairness?.total?(observedRate*100).toFixed(3)+'% ('+observed+')':'—'}`}><div className="bar-pair"><div className="bar" style={{height:`${Math.max(3,entry.probability/max*100)}%`}}/>{fairness&&<div className="bar observed" style={{height:observed?`${Math.max(3,observedRate/max*100)}%`:'0'}}/>}</div>{historic>0&&<span className="history-mark" aria-label={`${historic} ledger rolls: ${display(entry.value)}`}>{historic}</span>}<small>{display(entry.value)}</small></div>;})}</div><div className="stats"><span>{chart.range?`Range ${chart.range[0]}–${chart.range[1]}`:`${chart.entries.length} outcomes`}</span>{chart.mean!==undefined&&<span>Mean {chart.mean.toFixed(2)}</span>}<span>Mode {display(chart.mode??'—')}</span>{chartRolls.length>0&&<span>{chartRolls.length} ledger rolls</span>}</div><div className="fairness-controls"><button type="button" onClick={toggleFairness} disabled={!expression.trim()} aria-pressed={fairnessRunning}>{fairnessRunning?'Stop':'Calculate fairness'}</button>{fairness&&<span className="fairness-legend"><i aria-hidden="true"/> Observed · {fairness.total.toLocaleString()} rolls{fairness.total>shownFair?' · '+(fairness.total-shownFair).toLocaleString()+' outside visible chart':''}</span>}</div>{fairnessError&&<div className="input-error" role="alert">{fairnessError}</div>}</>}
     </section>
-    <section className="ledger" aria-label="Roll history">{history.length===0?<div className="empty">No rolls yet. Enter an expression to see its probabilities, then roll.</div>:history.slice().reverse().map(item=><article className="entry" key={item.requestId}><div className="entry-meta"><strong>{item.playerName}</strong><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></div><button className="expression-link" onClick={()=>{setExpression(item.expression);setDialect(item.dialect);setSelected(item);}} title="Put this expression back in the input">{item.expression}</button><div className="result">{item.error?'ERROR':'RESULT'} <strong>{item.error??display(item.value)}</strong></div><details><summary>Evaluation trace</summary><ol>{item.trace.map((step,i)=><li key={i}>{step}</li>)}</ol></details></article>)}</section>
+    <section className="ledger" aria-label="Roll history">{history.length===0?<div className="empty">No rolls yet. Enter an expression to see its probabilities, then roll.</div>:history.slice().reverse().map(item=><article className="entry" key={item.requestId}><div className="entry-meta"><strong>{item.playerName}</strong><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></div><button className="expression-link" onClick={()=>{setExpression(item.expression);setDialect(item.dialect);setSelected(null);}} title="Put this expression back in the input">{item.expression}</button><div className="result">{item.error?'ERROR':'RESULT'} <strong>{item.error??display(item.value)}</strong></div><details><summary>Evaluation trace</summary><ol>{item.trace.map((step,i)=><li key={i}>{step}</li>)}</ol></details></article>)}</section>
     <form className="composer" onSubmit={e=>{e.preventDefault();submit();}}>
       <label htmlFor="expression">Expression</label>
       <input id="expression" autoComplete="off" spellCheck={false} value={expression} onChange={e=>{setExpression(e.target.value);setSelected(null);setInputError('');}} placeholder="2d6+4 · H3[4d6] · d{Miss,Hit,Crit}" aria-describedby={inputError||chartError?'input-error':undefined}/>

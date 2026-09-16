@@ -52,6 +52,10 @@ The Roll20 dialect selector supports common `NdM`, arithmetic, parentheses, `khN
 
 Valid expressions are parsed 150 ms after typing stops, then evaluated in a Web Worker. Finite distributions are exact while the state space remains under the configured threshold in `src/engine/probability.ts`. Larger or unbounded expressions use a 20,000-trial estimate, labeled as such. The chart marks the latest selected roll outcome. Numeric results use a probability mass chart and show range and mean; symbolic results show categories. The chart displays at most 80 bars at once.
 
+**Calculate fairness** starts repeated local rolls of the current expression in a separate Web Worker. Teal bars show the accumulating observed frequencies beside the expected distribution, with the sample count beneath the chart. **Stop** preserves the observed bars for inspection. Starting again resets the sample, and editing the expression clears it. These samples do not create ledger entries, broadcast messages, or saved history. If samples produce outcomes outside the 80 visible chart bars, their count is shown below the chart.
+
+Rolls added to the ledger while an expression is active leave muted count markers at their outcomes on the distribution chart; the latest local result remains highlighted. Matching shared rolls count too. Changing the expression or dialect clears these chart markers and recalculates the distribution. The ledger itself remains available for rerolls and editing.
+
 Roll randomness uses `crypto.getRandomValues` with rejection sampling to avoid modulo bias. The engine accepts an injected RNG for deterministic tests. Unlimited explosions and rerolls have a defensive 100-step limit per die to prevent pathological infinite loops.
 
 ## Multiplayer and privacy
