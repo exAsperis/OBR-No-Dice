@@ -19,6 +19,7 @@ export default function App() {
   const [history,setHistory]=useState<RollResult[]>([]);
   const [chart,setChart]=useState<Distribution|null>(null);
   const [chartError,setChartError]=useState('');
+  const [notation,setNotation]=useState<{short:string;longReadable:string;longExpanded:string}|null>(null);
   const [inputError,setInputError]=useState('');
   const [selected,setSelected]=useState<RollResult|null>(null);
   const [busy,setBusy]=useState(false);
@@ -31,11 +32,11 @@ export default function App() {
   useEffect(()=>{ if(obr.roomId&&obr.playerId)saveHistory(obr.roomId,obr.playerId,history); },[history,obr.roomId,obr.playerId]);
   useEffect(()=>{
     const w=new Worker(new URL('./probability.worker.ts',import.meta.url),{type:'module'}); worker.current=w;
-    w.onmessage=(event:MessageEvent<{id:number;result?:Distribution;error?:string;incomplete?:boolean}>)=>{ if(event.data.id!==sequence.current)return; setChart(event.data.result??null); setChartError(event.data.incomplete?'':event.data.error??''); };
+    w.onmessage=(event:MessageEvent<{id:number;result?:Distribution;notation?:{short:string;longReadable:string;longExpanded:string};error?:string;incomplete?:boolean}>)=>{ if(event.data.id!==sequence.current)return; setChart(event.data.result??null); setNotation(event.data.notation??null); setChartError(event.data.incomplete?'':event.data.error??''); };
     return ()=>{w.terminate();worker.current=null;};
   },[]);
   useEffect(()=>{
-    const id=++sequence.current; setChart(null); setChartError('');
+    const id=++sequence.current; setChart(null); setNotation(null); setChartError('');
     if(!expression.trim())return;
     const t=window.setTimeout(()=>worker.current?.postMessage({id,expression,dialect}),150);
     return ()=>window.clearTimeout(t);
@@ -78,9 +79,15 @@ export default function App() {
     <section className="probability" aria-label="Probability distribution">
       <div className="section-heading"><strong>Distribution</strong><span>{chart?(chart.exact?'Exact distribution':`≈ Estimated from ${chart.trials?.toLocaleString()} trials`):chartError?'Unavailable':'Enter an expression'}</span></div>
       {chart&&<><div className="bars" role="img" aria-label="Probability mass chart">{chart.entries.slice(0,80).map((entry,i)=><div className={`bar-cell ${selected?.expression===expression&&display(selected.value)===display(entry.value)?'actual':''}`} key={i} title={`${display(entry.value)}: ${(entry.probability*100).toFixed(3)}%`}><div className="bar" style={{height:`${Math.max(3,entry.probability/max*100)}%`}}/><small>{display(entry.value)}</small></div>)}</div><div className="stats"><span>{chart.range?`Range ${chart.range[0]}–${chart.range[1]}`:`${chart.entries.length} outcomes`}</span>{chart.mean!==undefined&&<span>Mean {chart.mean.toFixed(2)}</span>}<span>Mode {display(chart.mode??'—')}</span></div></>}
-      {chartError&&<p className="chart-error">{chartError}</p>}
     </section>
-    <section className="ledger" aria-label="Roll history">{history.length===0?<div className="empty">No rolls yet. Enter an expression to see its probabilities, then roll.</div>:history.slice().reverse().map(item=><article className="entry" key={item.requestId}><div className="entry-meta"><strong>{item.playerName}</strong><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></div><button className="expression-link" onClick={()=>{setExpression(item.expression);setDialect(item.dialect);setSelected(item);}} title="Put this expression back in the input">{item.expression}</button><div className="result">{item.error?'ERROR':'TOTAL'} <strong>{item.error??display(item.value)}</strong></div><details><summary>Evaluation trace</summary><ol>{item.trace.map((step,i)=><li key={i}>{step}</li>)}</ol></details></article>)}</section>
-    <form className="composer" onSubmit={e=>{e.preventDefault();submit();}}><label htmlFor="expression">Expression</label><input id="expression" autoComplete="off" spellCheck={false} value={expression} onChange={e=>{setExpression(e.target.value);setSelected(null);setInputError('');}} placeholder="2d6+4 · H3[4d6] · d{Miss,Hit,Crit}" aria-describedby={inputError?'input-error':undefined}/>{inputError&&<div id="input-error" className="input-error" role="alert">{inputError}</div>}<div className="controls"><select aria-label="Expression dialect" value={dialect} onChange={e=>setDialect(e.target.value as Dialect)}><option value="nodice">No Dice</option><option value="roll20">Roll20</option></select><select aria-label="Roll visibility" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">Everyone</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" disabled={busy||!expression.trim()}>Roll ↵</button></div></form>
+    <section className="ledger" aria-label="Roll history">{history.length===0?<div className="empty">No rolls yet. Enter an expression to see its probabilities, then roll.</div>:history.slice().reverse().map(item=><article className="entry" key={item.requestId}><div className="entry-meta"><strong>{item.playerName}</strong><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></div><button className="expression-link" onClick={()=>{setExpression(item.expression);setDialect(item.dialect);setSelected(item);}} title="Put this expression back in the input">{item.expression}</button><div className="result">{item.error?'ERROR':'RESULT'} <strong>{item.error??display(item.value)}</strong></div><details><summary>Evaluation trace</summary><ol>{item.trace.map((step,i)=><li key={i}>{step}</li>)}</ol></details></article>)}</section>
+    <form className="composer" onSubmit={e=>{e.preventDefault();submit();}}>
+      <label htmlFor="expression">Expression</label>
+      <input id="expression" autoComplete="off" spellCheck={false} value={expression} onChange={e=>{setExpression(e.target.value);setSelected(null);setInputError('');}} placeholder="2d6+4 · H3[4d6] · d{Miss,Hit,Crit}" aria-describedby={inputError||chartError?'input-error':undefined}/>
+      {inputError&&<div id="input-error" className="input-error" role="alert">{inputError}</div>}
+      {!inputError&&chartError&&<div id="input-error" className="input-error" role="status">{chartError}</div>}
+      {notation&&<details className="notation"><summary>Notation</summary><dl><dt>Original</dt><dd>{expression}</dd><dt>Short</dt><dd>{notation.short}</dd><dt>Readable long</dt><dd>{notation.longReadable}</dd><dt>Expanded</dt><dd>{notation.longExpanded}</dd></dl></details>}
+      <div className="controls"><select aria-label="Expression dialect" value={dialect} onChange={e=>setDialect(e.target.value as Dialect)}><option value="nodice">No Dice</option><option value="roll20">Roll20</option></select><select aria-label="Roll visibility" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">Everyone</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" disabled={busy||!expression.trim()}>Roll ↵</button></div>
+    </form>
   </main>;
 }

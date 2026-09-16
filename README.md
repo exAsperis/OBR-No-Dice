@@ -21,16 +21,22 @@ Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm
 | --- | --- |
 | `d6`, `2d6`, `3d20` | Dice with integer facets 1 through N |
 | `d{0,1}`, `d{-2,-1,0,1,2}` | Numeric arbitrary dice |
-| `d{0.5,1,1.5}` | Decimal facets |
+| `d{0.5,1,1.5}`, `d{1/2,1}` | Decimal or rational facets |
 | `d{Miss,Miss,Hit,Crit}` | Symbolic facets; duplicates add weight |
 | `2d6+4`, `(d4+2)*3` | Arithmetic and grouping |
-| `pool(d4,d6)`, `p(d4,d6)` | Preserve individual values |
-| `sum(d4,d6)`, `s(d4,d6)` | Sum numeric values |
+| `p2d6`, `pool 2d6` | Preserve individual values |
+| `s2d6`, `sum 2d6` | Explicitly sum numeric values |
+| `pool(d4,d6)`, `sum(d4,d6)` | Legacy function forms for multiple sources |
 | `H[2d20]`, `H3[4d6]` | Keep highest one or N |
 | `L2[4d6]`, `DH[4d6]`, `DL2[4d6]` | Keep lowest or drop highest/lowest |
 | `d6!` | Exploding die |
+| `H[s2d6,d8]` | Compare a two-die sum with one d8 |
+| `H(d4)[5d6]` | Roll d4 once to determine how many to keep |
+| `(d4)d6`, `d(d{4,6,8})` | Dynamic quantity and die size |
 
-Arithmetic on numeric pools sums their elements first. Symbolic facets cannot participate in arithmetic; for symbolic keep/drop, facet order is rank. A single symbolic roll resolves to a category. Pools can also be explicitly kept as lists inside the AST. Invalid type combinations produce errors.
+Unmarked dice retain `inferred` resolution in the AST. They resolve to a sum in ordinary numeric expressions and to individual results inside a selector's bracketed pool. Explicit `p`/`pool` or `s`/`sum` overrides that inference. Thus `H[2d6,d8]` selects from three individual rolls, while `H[s2d6,d8]` selects from two values. Commas inside `[...]` concatenate pool sources. Numeric selectors sum retained values; a single selected symbol remains symbolic. Symbolic facets cannot participate in arithmetic, and duplicate symbolic facets keep the rank of their first appearance. Parentheses only group expressions.
+
+The notation panel shows the entered text, canonical short form, readable long form, and fully expanded long form. Short form collapses conventional facets to `dN` and omits selector count `1`; readable long form keeps conventional `dN` compact; expanded long form spells out all conventional facets. The two formatters serialize the AST independently. `H3[2d8]`, symbolic sums, nonpositive dice counts, and impossible dynamic structural values produce diagnostics rather than clamping or reinterpretation.
 
 The Roll20 dialect selector supports common `NdM`, arithmetic, parentheses, `khN`, `klN`, `dhN`, `dlN`, `r` and `ro` with numeric comparisons, and `!`. For example, `2d20kh1+5`, `4d6dl1`, and `d6ro=1`. This is an adapter into the same AST, not a second evaluator. Roll20 success counting and unusual modifier combinations are future work.
 
@@ -65,10 +71,10 @@ type RollRequest = {
 };
 ```
 
-Broadcast a `RollRequest` on the request channel. A GM with No Dice open evaluates it through the normal parser and evaluator. Everyone results are broadcast on the result channel using the `RollResult` type in `src/protocol.ts`. Self requests are evaluated locally by the GM. GM requests are currently ignored on the public request channel because their expression would be exposed to every client; use a private integration in a future protocol version. Keep requests below 1,000 characters and use unique request IDs. External callers should subscribe to the result channel before sending. Errors in externally requested expressions are not broadcast yet.
+Broadcast a `RollRequest` on the request channel. A GM with No Dice open evaluates it through the normal parser and evaluator. Everyone results or errors are broadcast on the result channel using the `RollResult` type in `src/protocol.ts`. Self requests are evaluated locally by the GM. GM requests are currently ignored on the public request channel because their expression would be exposed to every client; use a private integration in a future protocol version. Keep requests below 1,000 characters and use unique request IDs. External callers should subscribe to the result channel before sending.
 
 ## Architecture
 
-`src/engine/ast.ts` defines the expression model. `parser.ts` handles both dialects and produces that model. `evaluate.ts` performs random evaluation and builds trace steps. `probability.ts` computes exact PMFs independently of the random evaluator and falls back to sampling for large or unbounded cases. `probability.worker.ts` keeps distribution work off the UI thread. `protocol.ts`, `gmCrypto.ts`, and `persistence.ts` keep room transport and local history separate from dice semantics. `App.tsx` renders the chart, ledger, and input.
+`src/engine/tokenizer.ts` creates tokens with source spans. `parser.ts` turns tokens into the semantic AST in `ast.ts` and retains the original source in `parseDocument`. A dice node stores its quantity, standard or custom die, and `inferred`/`pool`/`sum` mode. `semantics.ts` resolves inferred modes by context in a separate pass without changing that AST. `validate.ts` reports structured static diagnostics before rolling. `evaluate.ts` performs random evaluation and builds trace steps. `probability.ts` computes exact PMFs independently of the random evaluator and falls back to sampling for large or unbounded cases. `format.ts` independently serializes short, readable long, and expanded long notation from the AST. `probability.worker.ts` keeps distribution work off the UI thread. `protocol.ts`, `gmCrypto.ts`, and `persistence.ts` keep room transport and local history separate from dice semantics. `App.tsx` renders the chart, ledger, notation, and input.
 
-The AST already represents the die count and keep/drop count as nodes. Dynamic forms such as `H(d4)[5d6]` and `(d4)d(d{4,6,8})` need parser grammar and validation work before they can be accepted. Future work also includes exact algorithms for larger keep/drop distributions, persistent event reception when the popover is closed, richer Roll20 compatibility, and a background receiver for integrations.
+Dynamic forms such as `H(d4)[5d6]` and `(d4)d(d{4,6,8})` are supported; each structural parameter is rolled once. Pool selectors share one AST abstraction for future operations. Future work includes exact algorithms for larger keep/drop distributions, persistent event reception when the popover is closed, richer Roll20 compatibility, and a background receiver for integrations.
