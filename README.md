@@ -1,0 +1,74 @@
+# No Dice
+
+**No fake dice. No fake physics. Just randomness, probability, and the receipts.**
+
+No Dice is an Owlbear Rodeo 2 action popover for dice expressions, arbitrary weighted facets, staged roll traces, and live probability distributions. It uses React, TypeScript, Vite, and `@owlbear-rodeo/sdk` 3.1.
+
+## Install and develop
+
+Install the hosted extension in Owlbear Rodeo through **Extensions → Add Custom Extension** using `https://no-dice.ex-asperis.com/manifest.json`. The GitHub Pages workflow builds and deploys on pushes to `main`; the custom domain must point to that Pages site. For local development:
+
+```sh
+pnpm install
+pnpm dev
+```
+
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.1.4.json` is a cache-busting alternative to the stable manifest.
+
+## Native expressions
+
+| Expression | Meaning |
+| --- | --- |
+| `d6`, `2d6`, `3d20` | Dice with integer facets 1 through N |
+| `d{0,1}`, `d{-2,-1,0,1,2}` | Numeric arbitrary dice |
+| `d{0.5,1,1.5}` | Decimal facets |
+| `d{Miss,Miss,Hit,Crit}` | Symbolic facets; duplicates add weight |
+| `2d6+4`, `(d4+2)*3` | Arithmetic and grouping |
+| `pool(d4,d6)`, `p(d4,d6)` | Preserve individual values |
+| `sum(d4,d6)`, `s(d4,d6)` | Sum numeric values |
+| `H[2d20]`, `H3[4d6]` | Keep highest one or N |
+| `L2[4d6]`, `DH[4d6]`, `DL2[4d6]` | Keep lowest or drop highest/lowest |
+| `d6!` | Exploding die |
+
+Arithmetic on numeric pools sums their elements first. Symbolic facets cannot participate in arithmetic; for symbolic keep/drop, facet order is rank. A single symbolic roll resolves to a category. Pools can also be explicitly kept as lists inside the AST. Invalid type combinations produce errors.
+
+The Roll20 dialect selector supports common `NdM`, arithmetic, parentheses, `khN`, `klN`, `dhN`, `dlN`, `r` and `ro` with numeric comparisons, and `!`. For example, `2d20kh1+5`, `4d6dl1`, and `d6ro=1`. This is an adapter into the same AST, not a second evaluator. Roll20 success counting and unusual modifier combinations are future work.
+
+## Probability and rolls
+
+Valid expressions are parsed 150 ms after typing stops, then evaluated in a Web Worker. Finite distributions are exact while the state space remains under the configured threshold in `src/engine/probability.ts`. Larger or unbounded expressions use a 20,000-trial estimate, labeled as such. The chart marks the latest selected roll outcome. Numeric results use a probability mass chart and show range and mean; symbolic results show categories. The chart displays at most 80 bars at once.
+
+Roll randomness uses `crypto.getRandomValues` with rejection sampling to avoid modulo bias. The engine accepts an injected RNG for deterministic tests. Explosions and rerolls have a defensive 100-step limit per die to prevent pathological infinite loops.
+
+## Multiplayer and privacy
+
+Everyone rolls are broadcast as versioned events and appear in open No Dice popovers. Self rolls never leave the current client. GM rolls are encrypted with an ephemeral GM public key stored in room metadata; only the GM popover holds the private key. A GM must have No Dice open before a player can send a GM roll. The GM key changes when that popover reopens. OBR broadcasts are ephemeral, so a closed popover misses events; local history stores the rolls that the current client actually saw, capped at 100 per player and room. Scene metadata is not used for history, and rolling works even when no scene is open.
+
+The extension is available to all players. Room metadata contains only the GM public key. The sender's own private roll is stored locally; other players see only encrypted GM payloads. As with any client extension, the result protocol does not provide a server trust guarantee against a malicious client forging messages.
+
+## Integration API
+
+Channels are derived from `com.ex-asperis.no-dice`:
+
+```ts
+const REQUEST_CHANNEL = 'com.ex-asperis.no-dice/roll-request/v1';
+const RESULT_CHANNEL = 'com.ex-asperis.no-dice/roll-result/v1';
+
+type RollRequest = {
+  version: 1;
+  requestId: string;
+  expression: string;
+  dialect?: 'nodice' | 'roll20';
+  visibility?: 'everyone' | 'self' | 'gm';
+  label?: string;
+  source?: string;
+};
+```
+
+Broadcast a `RollRequest` on the request channel. A GM with No Dice open evaluates it through the normal parser and evaluator. Everyone results are broadcast on the result channel using the `RollResult` type in `src/protocol.ts`. Self requests are evaluated locally by the GM. GM requests are currently ignored on the public request channel because their expression would be exposed to every client; use a private integration in a future protocol version. Keep requests below 1,000 characters and use unique request IDs. External callers should subscribe to the result channel before sending. Errors in externally requested expressions are not broadcast yet.
+
+## Architecture
+
+`src/engine/ast.ts` defines the expression model. `parser.ts` handles both dialects and produces that model. `evaluate.ts` performs random evaluation and builds trace steps. `probability.ts` computes exact PMFs independently of the random evaluator and falls back to sampling for large or unbounded cases. `probability.worker.ts` keeps distribution work off the UI thread. `protocol.ts`, `gmCrypto.ts`, and `persistence.ts` keep room transport and local history separate from dice semantics. `App.tsx` renders the chart, ledger, and input.
+
+The AST already represents the die count and keep/drop count as nodes. Dynamic forms such as `H(d4)[5d6]` and `(d4)d(d{4,6,8})` need parser grammar and validation work before they can be accepted. Future work also includes exact algorithms for larger keep/drop distributions, persistent event reception when the popover is closed, richer Roll20 compatibility, and a background receiver for integrations.
