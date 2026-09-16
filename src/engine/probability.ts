@@ -3,6 +3,7 @@ import { roll, type Value } from './evaluate';
 import { resolveSemantics } from './semantics';
 export const MAX_STATES=30000;
 export const ESTIMATE_TRIALS=20000;
+export const MAX_ESTIMATE_MS=1500;
 export interface Distribution { entries:{value:Value;probability:number}[];exact:boolean;trials?:number;mean?:number;mode?:Value;range?:[number,number] }
 type PMF=Map<string,{value:Value;p:number}>;
 type FaceOutcome={value:Facet;p:number;explosion?:Explosion};
@@ -116,16 +117,21 @@ function exact(root:Node):PMF{
   return visit(root,'scalar');
 }
 export function distribution(node:Node):Distribution{
-  let pmf:PMF;let isExact=true;
+  let pmf:PMF;let isExact=true;let trials=0;
   try{pmf=exact(node);}catch(error){
     if(error instanceof ExpressionError)throw error;
     isExact=false;pmf=new Map();const rng={integer:(n:number)=>Math.floor(Math.random()*n)};
-    for(let i=0;i<ESTIMATE_TRIALS;i++)put(pmf,roll(node,rng,false).value,1/ESTIMATE_TRIALS);
+    const deadline=performance.now()+MAX_ESTIMATE_MS;
+    while(trials<ESTIMATE_TRIALS){
+      if(trials>0&&performance.now()>=deadline)break;
+      put(pmf,roll(node,rng,false).value,1);trials++;
+    }
+    for(const item of pmf.values())item.p/=trials;
   }
   const entries=[...pmf.values()].map(x=>({value:x.value,probability:x.p})).sort((a,b)=>typeof a.value==='number'&&typeof b.value==='number'?a.value-b.value:String(a.value).localeCompare(String(b.value)));
   const numeric=entries.every(x=>typeof x.value==='number');
   const mean=numeric?entries.reduce((a,b)=>a+(b.value as number)*b.probability,0):undefined;
   const mode=entries.reduce((a,b)=>b.probability>a.probability?b:a,entries[0])?.value;
   const range=numeric&&entries.length?[entries[0].value as number,entries.at(-1)!.value as number] as [number,number]:undefined;
-  return {entries,exact:isExact,trials:isExact?undefined:ESTIMATE_TRIALS,mean,mode,range};
+  return {entries,exact:isExact,trials:isExact?undefined:trials,mean,mode,range};
 }

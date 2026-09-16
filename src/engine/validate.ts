@@ -93,6 +93,15 @@ export function validate(root:Node):Diagnostic[]{
           if(node.die.facets.every(f=>f.explosion)&&node.die.facets.some(f=>f.explosion?.limit===undefined))issue(node,'NO_TERMINATION','An unlimited die whose every facet explodes cannot terminate');
         }
         if(node.reroll&&typeOf(node)!=='numeric')issue(node,'SYMBOLIC_REROLL','Rerolls require numeric facets');
+        if(node.reroll&&!node.reroll.once){
+          const {comparator,target}=node.reroll;
+          const matches=(value:number)=>comparator==='='?value===target:comparator==='<'?value<target:comparator==='<='?value<=target:comparator==='>'?value>target:value>=target;
+          const possibleSides=node.die.kind==='standard-die'?possibleNumbers(node.die.sides):undefined;
+          const faces=node.die.kind==='custom-die'
+            ?node.die.facets.map(f=>f.kind==='value'&&typeof f.value==='number'?[f.value]:f.kind==='expression'?possibleNumbers(f.expression):undefined)
+            :possibleSides?.flatMap(size=>Number.isInteger(size)&&size>0&&size<=1000?Array.from({length:size},(_,i)=>i+1):[]).map(value=>[value]);
+          if(faces?.length&&faces.every(values=>values!==undefined&&values.length>0&&values.every(matches)))issue(node,'NO_TERMINATION','Every possible facet matches the unlimited reroll condition');
+        }
         break;
       }
       case 'pool':node.items.forEach(check);break;

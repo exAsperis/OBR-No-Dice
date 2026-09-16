@@ -51,6 +51,11 @@ describe('facet explosion',()=>{
     expect(roll(parse('d{Miss!,Hit}'),fixed(0)).value).toBe('Miss!');
     expect(roll(parse('H[d{Miss!2,Hit}]'),fixed(0)).value).toBe('Miss!2');
     expect(roll(parse('d{5! cats}'),fixed(0)).value).toBe('5! cats');
-    for(const source of ['d6!0','d6!1.5','d1!','d{1!,2!}'])expect(()=>parse(source),source).toThrow();
+    for(const source of ['d6!0','d6!1.5','d1!','d{1!}','d{1!,2!}'])expect(()=>parse(source),source).toThrow();
+  });
+  it('stops an unlucky unlimited explosion across nested facet evaluation',()=>{
+    const alwaysFirst:Rng={integer:()=>0};
+    expect(()=>roll(parse('d{1!,2}'),alwaysFirst)).toThrow(/safety limit/);
+    expect(()=>roll(parse('d{d{1!,2}}'),alwaysFirst)).toThrow(/safety limit/);
   });
 });

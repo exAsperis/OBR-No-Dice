@@ -1,1 +1,13 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="14" fill="#201d2a"/><path d="M12 45V32h7v13zm11 0V19h7v26zm11 0V25h7v20zm11 0V11h7v34z" fill="#a68bfa"/><path d="M10 51h44" stroke="#eee9fa" stroke-width="3" stroke-linecap="round"/></svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="No Dice">
+  <!-- Orthographic projection of a regular icosahedron. Its vertices are
+       permutations of (0, +/-1, +/-phi), where phi=(1+sqrt(5))/2;
+       every 3D edge has length 2. Scale is 15 and center is (32,32). -->
+  <g fill="none" stroke="#4da3ff" stroke-linecap="round" stroke-linejoin="round">
+    <path stroke-width="2" d="M32 7.729 56.271 17 56.271 47 32 56.271 7.729 47 7.729 17Z
+      M32 7.729 17 32 47 32 32 7.729
+      M7.729 17 17 32 7.729 47
+      M56.271 17 47 32 56.271 47
+      M17 32 32 56.271 47 32"/>
+    <path stroke-width="4.2" d="M12 58 52 6"/>
+  </g>
+</svg>

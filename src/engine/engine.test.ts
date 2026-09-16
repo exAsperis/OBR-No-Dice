@@ -44,4 +44,9 @@ describe('No Dice engine',()=>{
     expect(pmf('d6!','roll20').exact).toBe(false);
     expect(roll(parse('d6ro=1','roll20'),fixed(0,4)).value).toBe(5);
   });
+  it('rejects guaranteed reroll loops and bounds unlucky rerolls',()=>{
+    expect(()=>parse('d1r=1','roll20')).toThrow(/reroll|terminate/i);
+    expect(()=>parse('d6r>=1','roll20')).toThrow(/reroll|terminate/i);
+    expect(()=>roll(parse('d6r=1','roll20'),{integer:()=>0})).toThrow(/Reroll limit reached/);
+  });
 });
