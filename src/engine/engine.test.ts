@@ -31,6 +31,10 @@ describe('No Dice engine',()=>{
     expect(chance('2d{0,1}',0)).toBeCloseTo(.25);expect(chance('2d{0,1}',1)).toBeCloseTo(.5);expect(chance('2d{0,1}',2)).toBeCloseTo(.25);
     expect(chance('2d6+4',11)).toBeCloseTo(6/36);
     expect(pmf('2d6').mean).toBeCloseTo(7);
+    expect(pmf('d6').standardDeviation).toBeCloseTo(Math.sqrt(35/12));
+    expect(pmf('2d6').standardDeviation).toBeCloseTo(Math.sqrt(35/6));
+    expect(pmf('2d{0,1}').standardDeviation).toBeCloseTo(Math.sqrt(0.5));
+    expect(pmf('d{Miss,Miss,Hit}').standardDeviation).toBeUndefined();
     expect(pmf('d{Miss,Miss,Hit}').entries.reduce((s,e)=>s+e.probability,0)).toBeCloseTo(1);
   });
   it('adapts Roll20 notation into the same AST',()=>{

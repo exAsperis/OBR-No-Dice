@@ -8,6 +8,9 @@ export function tokenize(source:string):Token[] {
   while(i<source.length) {
     const c=source[i]; if(/\s/.test(c)){i++;continue;}
     const start=i;
+    if(c==='.'&&source[i+1]==='.'){
+      i+=2;tokens.push({kind:'symbol',text:'..',start,end:i});continue;
+    }
     if(isDigit(c)||(c==='.'&&isDigit(source[i+1]??''))) {
       while(isDigit(source[i]??''))i++;
       if(source[i]==='.'&&isDigit(source[i+1]??'')){i++;while(isDigit(source[i]??''))i++;}

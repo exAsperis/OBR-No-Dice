@@ -30,7 +30,7 @@ function semantic(node:Node):unknown{
   }
 }
 const valid=[
-  'd6','d7','d{0,0,1,1}','d{-1,0,1}','d{Miss,Miss,Hit,Crit}',
+  'd6','d7','d{0,0,1,1}','d{-1,0,1}','d{0..100}','d{-2..2}','d{Miss,Miss,Hit,Crit}',
   '2d6','p2d6','pool 2d6','s2d6','sum 2d6',
   'H[2d8]','H1[2d8]','H2[3d4]','L[2d20]','L2[4d10]',
   'DH[4d6]','DH2[5d6]','DL[4d6]','DL2[6d10]',
@@ -59,6 +59,19 @@ describe('unified notation',()=>{
     expect(formatLongReadable(parse('H2[3d4]'))).toBe('highest 2 of [3 d4]');
     expect(formatLongExpanded(parse('H2[3d4]'))).toBe('highest 2 of [3 die{1,2,3,4}]');
     expect(formatShort(parse('DL1[4d6]'))).toBe('DL[4d6]');
+    expect(formatShort(parse('d{0..100}'))).toBe('d{0..100}');
+    expect(formatLongReadable(parse('d{0..100}'))).toBe('die{0..100}');
+    expect(formatShort(parse('d{0,1}'))).toBe('d{0,1}');
+  });
+  it('expands inclusive facet ranges into ordinary equally likely facets',()=>{
+    const chart=distribution(parse('d{0..100}'));
+    expect(chart.exact).toBe(true);
+    expect(chart.entries).toHaveLength(101);
+    expect(chart.entries[0]).toEqual({value:0,probability:1/101});
+    expect(chart.entries.at(-1)).toEqual({value:100,probability:1/101});
+    expect(roll(parse('d{-2..2}'),rng(4)).value).toBe(2);
+    expect(distribution(parse('d{0..2,2}')).entries.find(entry=>entry.value===2)?.probability).toBeCloseTo(0.5);
+    for(const source of ['d{3..1}','d{0.5..2}','d{0..1000}'])expect(()=>parse(source),source).toThrow();
   });
   it('keeps inferred, pool and sum modes distinct in the AST',()=>{
     const inferred=parse('H[2d6,d8]');const summed=parse('H[s2d6,d8]');const pooled=parse('H[p2d6,d8]');

@@ -4,7 +4,7 @@ import { resolveSemantics } from './semantics';
 export const MAX_STATES=30000;
 export const ESTIMATE_TRIALS=20000;
 export const MAX_ESTIMATE_MS=1500;
-export interface Distribution { entries:{value:Value;probability:number}[];exact:boolean;trials?:number;mean?:number;mode?:Value;range?:[number,number] }
+export interface Distribution { entries:{value:Value;probability:number}[];exact:boolean;trials?:number;mean?:number;standardDeviation?:number;mode?:Value;range?:[number,number] }
 type PMF=Map<string,{value:Value;p:number}>;
 type FaceOutcome={value:Facet;p:number;explosion?:Explosion};
 type Context='scalar'|'pool-source';
@@ -131,7 +131,8 @@ export function distribution(node:Node):Distribution{
   const entries=[...pmf.values()].map(x=>({value:x.value,probability:x.p})).sort((a,b)=>typeof a.value==='number'&&typeof b.value==='number'?a.value-b.value:String(a.value).localeCompare(String(b.value)));
   const numeric=entries.every(x=>typeof x.value==='number');
   const mean=numeric?entries.reduce((a,b)=>a+(b.value as number)*b.probability,0):undefined;
+  const standardDeviation=mean===undefined?undefined:Math.sqrt(Math.max(0,entries.reduce((variance,entry)=>variance+entry.probability*((entry.value as number)-mean)**2,0)));
   const mode=entries.reduce((a,b)=>b.probability>a.probability?b:a,entries[0])?.value;
   const range=numeric&&entries.length?[entries[0].value as number,entries.at(-1)!.value as number] as [number,number]:undefined;
-  return {entries,exact:isExact,trials:isExact?undefined:trials,mean,mode,range};
+  return {entries,exact:isExact,trials:isExact?undefined:trials,mean,standardDeviation,mode,range};
 }

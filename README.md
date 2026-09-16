@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.4.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.7.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Native expressions
 
@@ -21,6 +21,7 @@ Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm
 | --- | --- |
 | `d6`, `2d6`, `3d20` | Dice with integer facets 1 through N |
 | `d{0,1}`, `d{-2,-1,0,1,2}` | Numeric arbitrary dice |
+| `d{0..100}`, `d{-2..2}` | Inclusive integer facet ranges |
 | `d{0.5,1,1.5}`, `d{1/2,1}` | Decimal or rational facets |
 | `d{Miss,Miss,Hit,Crit}` | Symbolic facets; duplicates add weight |
 | `d{d4,d6+1,2d8}` | Choose one facet, then evaluate its expression |
@@ -41,7 +42,7 @@ Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm
 
 Unmarked dice retain `inferred` resolution in the AST. They resolve to a sum in ordinary numeric expressions and to individual results inside a selector's bracketed pool. Explicit `p`/`pool` or `s`/`sum` overrides that inference. Thus `H[2d6,d8]` selects from three individual rolls, while `H[s2d6,d8]` selects from two values. Commas inside `[...]` concatenate pool sources. Numeric selectors sum retained values; a single selected symbol remains symbolic. Symbolic facets cannot participate in arithmetic, and duplicate symbolic facets keep the rank of their first appearance. Parentheses only group expressions.
 
-Each custom die facet is an equally likely branch. A branch may be a literal value, a dice expression, or text with one or more embedded expressions. No Dice chooses the branch first, then evaluates only that branch. `d{d4,d6+1,2d8}` therefore has an exact distribution equal to a one-third mixture of those three expression distributions. Text results such as `A bag of 42 gold pieces` remain categorical. A chosen branch with unlimited explosion uses the labeled estimate. Repeating a branch weights it just like repeating a literal facet. Text templates have no fixed symbolic rank, so highest/lowest selectors reject them rather than inventing an order.
+Each custom die facet is an equally likely branch. A branch may be a literal value, a dice expression, or text with one or more embedded expressions. No Dice chooses the branch first, then evaluates only that branch. `d{d4,d6+1,2d8}` therefore has an exact distribution equal to a one-third mixture of those three expression distributions. An inclusive range such as `d{0..100}` expands to 101 ordinary numeric facets; range bounds must be ascending integers and a custom die may have at most 1,000 facets. Text results such as `A bag of 42 gold pieces` remain categorical. A chosen branch with unlimited explosion uses the labeled estimate. Repeating a branch weights it just like repeating a literal facet. Text templates have no fixed symbolic rank, so highest/lowest selectors reject them rather than inventing an order.
 
 Explosion is a property of a **numeric facet**. A marked facet adds another result from the same die; another marked facet continues the chain. `d6!` abbreviates `d{1,2,3,4,5,6!}`, and `d6!2` abbreviates `d{1,2,3,4,5,6!2}`. The `2` permits at most two additional rolls after the initial result, even if the second and third facets are marked. With differently limited facets, the initially selected facet sets the cap for that chain. Limited explosions have exact finite distributions when manageable; unlimited explosions are estimated. A die with no possible termination, such as `d1!`, is rejected. In symbolic or text facets, `!` is text: `d{Miss!,Hit}` returns `Miss!`. An embedded numeric expression can still explode before rendering text, as in `d{d4! dogs}`.
 
@@ -53,9 +54,11 @@ The input automatically accepts common Roll20 `NdM`, arithmetic, parentheses, `k
 
 ## Probability and rolls
 
-Valid expressions are parsed 150 ms after typing stops, then evaluated in a Web Worker. Finite distributions are exact while the state space remains under the configured threshold in `src/engine/probability.ts`. Larger or unbounded expressions use an estimate of up to 20,000 trials, stopping after a 1.5-second calculation budget and labeling the actual trial count. The chart marks the latest selected roll outcome. Numeric results use a probability mass chart and show range and mean; symbolic results show categories. The chart displays at most 80 bars at once.
+Valid expressions are parsed 150 ms after typing stops, then evaluated in a Web Worker. Finite distributions are exact while the state space remains under the configured threshold in `src/engine/probability.ts`. Larger or unbounded expressions use an estimate of up to 20,000 trials, stopping after a 1.5-second calculation budget and labeling the actual trial count. The chart marks the latest selected roll outcome. Numeric results use a probability mass chart and show range, mean, population standard deviation, and mode; symbolic results show categories. The main chart displays at most 200 bars at once, enough for every outcome of `d{0..100}`.
 
-**Calculate fairness** starts repeated local rolls of the current expression in a separate Web Worker. Teal bars show the accumulating observed frequencies beside the expected distribution, with the sample count beneath the chart. **Stop** preserves the observed bars for inspection. Starting again resets the sample, and editing the expression clears it. These samples do not create ledger entries, broadcast messages, or saved history. If samples produce outcomes outside the 80 visible chart bars, their count is shown below the chart.
+The expression composer has shortcuts for Coin (`d{0,1}`), d4, d6, d8, d10, d12, d20, d100, and `%` (`d{0..100}`). A shortcut inserts its term into an empty input or adds it to an existing expression. Clear empties the expression field and returns focus to it. If the final additive term is the same unmodified die, the shortcut increments its quantity instead (`d6` becomes `2d6`).
+
+**Calculate fairness** starts repeated local rolls of the current expression in a separate Web Worker. It begins at two rolls per second, doubles its pace about every 0.85 seconds, and caps at 2,048 rolls per second. Teal bars show the accumulating observed frequencies beside the expected distribution, with the sample count beneath the chart. **Stop** preserves the observed bars for inspection. Starting again resets the sample, and editing the expression clears it. These samples do not create ledger entries, broadcast messages, or saved history. If samples produce outcomes outside the 80 visible chart bars, their count is shown below the chart.
 
 Rolls added to the ledger while an expression is active leave muted count markers at their outcomes on the distribution chart; the latest local result remains highlighted. Matching shared rolls count too. Changing the expression clears these chart markers and recalculates the distribution. The ledger itself remains available for rerolls and editing.
 

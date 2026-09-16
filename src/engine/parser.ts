@@ -58,7 +58,11 @@ class Parser {
     if(this.take('{')){
       const facets:FacetSpec[]=[];
       if(this.is('}'))this.error('A die must have at least one facet','EMPTY_DIE');
-      do{facets.push(this.facet());}while(this.take(','));
+      do{
+        const range=this.rangeFacets();
+        facets.push(...(range??[this.facet()]));
+        if(facets.length>1000)this.error('A die may contain at most 1,000 facets','FACET_LIMIT');
+      }while(this.take(','));
       end=this.expect('}');die={kind:'custom-die',facets};
     }else if(this.is('(')){
       const sides=this.group();die={kind:'standard-die',sides};end=sides.span;
@@ -102,6 +106,21 @@ class Parser {
     }
     return result;
   }
+  private rangeFacets():FacetSpec[]|undefined{
+    const checkpoint=this.index,first=this.at();
+    const firstSign=this.take('-')?-1:1;
+    if(this.at().kind!=='number'){this.index=checkpoint;return undefined;}
+    const lower=this.number();
+    if(!this.take('..')){this.index=checkpoint;return undefined;}
+    const secondSign=this.take('-')?-1:1;
+    const upper=this.number();
+    if(!this.is(',')&&!this.is('}'))this.error('A facet range must end before a comma or closing brace','INVALID_FACET_RANGE');
+    const start=firstSign*lower.value,end=secondSign*upper.value;
+    if(!Number.isInteger(start)||!Number.isInteger(end)||end<start||end-start+1>1000)
+      this.error('Facet ranges need ascending integer bounds and at most 1,000 values','INVALID_FACET_RANGE');
+    const where=span(first,upper);
+    return Array.from({length:end-start+1},(_,index)=>({kind:'value' as const,value:start+index,span:where}));
+  }
   private facet():FacetSpec{
     const first=this.at();
     if(first.kind==='eof'||this.is(',')||this.is('}'))this.error('Expected a die facet');
@@ -139,7 +158,7 @@ class Parser {
     const explosion=this.explosion();
     if(explosion&&!this.is(',')&&!this.is('}'))this.error('Explosion marker must end a facet');
     const facetSpan=span(first,explosion?this.tokens[this.index-1]:last);
-    if(meaningful.length===1){const only=meaningful[0];if(only.kind==='text')return {kind:'value',value:only.text,span:facetSpan,explosion};if(only.expression.kind==='literal')return {kind:'value',value:only.expression.value,span:facetSpan,explosion};return {kind:'expression',expression:only.expression,span:facetSpan,explosion};}
+    if(meaningful.length===1){const only=meaningful[0];if(only.kind==='text')return {kind:'value',value:only.text,span:facetSpan,explosion};if(only.expression.kind==='literal')return {kind:'value',value:only.expression.value,span:facetSpan,explosion};if(only.expression.kind==='unary'&&only.expression.value.kind==='literal')return {kind:'value',value:-only.expression.value.value,span:facetSpan,explosion};return {kind:'expression',expression:only.expression,span:facetSpan,explosion};}
     return {kind:'template',segments:meaningful,span:facetSpan,explosion};
   }
   private explosion():Explosion|undefined{

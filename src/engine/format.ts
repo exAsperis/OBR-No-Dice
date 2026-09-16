@@ -19,6 +19,13 @@ function conventional(facets:FacetSpec[]):{sides:number;explosion?:Explosion}|un
   if(facets.some(x=>x.explosion&&facetNumber(x)!==sorted.length))return undefined;
   return {sides:sorted.length,explosion:facets.find(x=>facetNumber(x)===sorted.length)?.explosion};
 }
+function compactRange(facets:FacetSpec[]):string|undefined{
+  if(facets.length<2||!facets.every(f=>f.kind==='value'&&typeof f.value==='number'&&Number.isInteger(f.value)&&!f.explosion))return undefined;
+  const values=facets.map(f=>(f as Extract<FacetSpec,{kind:'value'}>).value as number);
+  if(!values.every((value,index)=>value===values[0]+index))return undefined;
+  const range=`${values[0]}..${values.at(-1)}`;
+  return range.length<values.join(',').length?range:undefined;
+}
 function facetText(facet:FacetSpec,style:FormatStyle):string{
   let value:string;
   if(facet.kind==='value')value=String(facet.value);
@@ -44,7 +51,8 @@ function format(node:Node,style:FormatStyle,parent=0):string{
         die=style==='longExpanded'&&fixed!==undefined&&Number.isInteger(fixed)&&fixed>0&&fixed<=1000?`die{${Array.from({length:fixed},(_,i)=>`${i+1}${i+1===fixed?explosionText(highestExplosion):''}`).join(',')}}`:`d${sides}${explosionText(highestExplosion)}`;
       }else{
         const fixed=conventional(node.die.facets);
-        die=style!=='longExpanded'&&fixed?`d${fixed.sides}${explosionText(fixed.explosion)}`:`${style==='short'?'d':'die'}{${node.die.facets.map(face=>facetText(face,style)).join(',')}}`;
+        const range=style==='longExpanded'?undefined:compactRange(node.die.facets);
+        die=style!=='longExpanded'&&fixed?`d${fixed.sides}${explosionText(fixed.explosion)}`:`${style==='short'?'d':'die'}{${range??node.die.facets.map(face=>facetText(face,style)).join(',')}}`;
       }
       const prefix=node.resolution==='inferred'?'':style==='short'?(node.resolution==='pool'?'p':'s'):`${node.resolution} `;
       const separator=style==='short'?'':quantity?' ':'';
