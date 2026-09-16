@@ -61,17 +61,17 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       const faceCount=node.die.kind==='custom-die'?node.die.facets.length:positiveInteger(sides!.value,'Die size',1000);
       if(!faceCount)throw new ExpressionError('A die must have at least one facet');
       const results:Facet[]=[];const trace=[...quantity.trace,...(sides?.trace??[])];
-      const draw=():{value:Facet;explosion?:Explosion}=>{
+      const draw=():{value:Facet;explosion?:Explosion;facetReroll?:Explosion;index:number}=>{
         spend(budget);
         const index=rng.integer(faceCount);
-        if(node.die.kind==='standard-die')return {value:index+1,explosion:index+1===faceCount?node.die.explodeHighest:undefined};
+        if(node.die.kind==='standard-die')return {value:index+1,index,explosion:index+1===faceCount?node.die.explodeHighest:undefined,facetReroll:index===0?node.die.rerollLowest:undefined};
         const facet=node.die.facets[index];
-        if(facet.kind==='value')return {value:facet.value,explosion:facet.explosion};
+        if(facet.kind==='value')return {value:facet.value,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
         trace.push(`facet ${index+1}/${faceCount} → ${formatFacetShort(facet)}`);
         if(facet.kind==='expression'){
           const result=evaluateNode(facet.expression,rng,'scalar',plan,presentation,false,budget);trace.push(...result.trace);
           if(Array.isArray(result.value))throw new ExpressionError('A facet expression must resolve to one value');
-          trace.push(`facet result → ${result.value}`);return {value:result.value,explosion:facet.explosion};
+          trace.push(`facet result → ${result.value}`);return {value:result.value,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
         }
         const rendered=facet.segments.map(segment=>{
           if(segment.kind==='text')return segment.text;
@@ -79,7 +79,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
           if(Array.isArray(result.value))throw new ExpressionError('A text facet expression must resolve to one value');
           return String(result.value);
         }).join('').trim();
-        trace.push(`facet result → ${rendered}`);return {value:rendered,explosion:facet.explosion};
+        trace.push(`facet result → ${rendered}`);return {value:rendered,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
       };
       for(let i=0;i<count;i++){
         let drawn=draw(),face=drawn.value;trace.push(`die ${i+1} → ${face}`);
@@ -88,12 +88,22 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
           const matches=(v:Facet)=>{const x=number(v);return comparator==='='?x===target:comparator==='<'?x<target:comparator==='<='?x<=target:comparator==='>'?x>target:x>=target;};
           let tries=0;while(matches(face)){if(++tries>100)throw new ExpressionError('Reroll limit reached');drawn=draw();face=drawn.value;trace.push(`reroll → ${face}`);if(once)break;}
         }
+        const settleFacetRerolls=()=>{
+          const rerollCounts=new Map<number,number>();let rerolls=0;
+          while(drawn.facetReroll){
+            const used=rerollCounts.get(drawn.index)??0,limit=drawn.facetReroll.limit;
+            if(limit!==undefined&&used>=limit)break;
+            if(++rerolls>100)throw new ExpressionError('Reroll safety limit reached');
+            rerollCounts.set(drawn.index,used+1);drawn=draw();face=drawn.value;trace.push(`reroll → ${face}`);
+          }
+        };
+        settleFacetRerolls();
         let value:Facet=face;
         if(drawn.explosion){
           const limit=drawn.explosion.limit??100,unbounded=drawn.explosion.limit===undefined;
           let extra=0;
           while(drawn.explosion&&extra<limit){
-            extra++;drawn=draw();face=drawn.value;trace.push(`explode → ${face}`);value=number(value)+number(face);
+            extra++;drawn=draw();face=drawn.value;trace.push(`explode → ${face}`);settleFacetRerolls();value=number(value)+number(face);
           }
           if(unbounded&&extra===100&&drawn.explosion)throw new ExpressionError('Explosion safety limit reached');
           trace.push(`die ${i+1} total → ${value}`);

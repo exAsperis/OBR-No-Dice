@@ -6,7 +6,7 @@ export const ESTIMATE_TRIALS=20000;
 export const MAX_ESTIMATE_MS=1500;
 export interface Distribution { entries:{value:Value;probability:number}[];exact:boolean;trials?:number;mean?:number;standardDeviation?:number;mode?:Value;range?:[number,number] }
 type PMF=Map<string,{value:Value;p:number}>;
-type FaceOutcome={value:Facet;p:number;explosion?:Explosion};
+type FaceOutcome={value:Facet;p:number;explosion?:Explosion;facetReroll?:Explosion;index:number};
 type Context='scalar'|'pool-source';
 const key=(v:Value)=>JSON.stringify(v);
 const put=(out:PMF,value:Value,p:number)=>{const k=key(value),old=out.get(k);out.set(k,{value,p:(old?.p??0)+p});if(out.size>MAX_STATES)throw new Error('state limit');};
@@ -43,13 +43,13 @@ function exact(root:Node):PMF{
           const faceCount=node.die.kind==='custom-die'?node.die.facets.length:s;
           if(!Number.isInteger(faceCount)||faceCount<1||faceCount>1000)throw new ExpressionError('Invalid die size');
           const faces:FaceOutcome[]=[];
-          if(node.die.kind==='standard-die')for(let face=1;face<=faceCount;face++)faces.push({value:face,p:1/faceCount,explosion:face===faceCount?node.die.explodeHighest:undefined});
-          else for(const facet of node.die.facets){
-            if(facet.kind==='value'){faces.push({value:facet.value,p:1/faceCount,explosion:facet.explosion});continue;}
+          if(node.die.kind==='standard-die')for(let face=1;face<=faceCount;face++)faces.push({value:face,p:1/faceCount,index:face-1,explosion:face===faceCount?node.die.explodeHighest:undefined,facetReroll:face===1?node.die.rerollLowest:undefined});
+          else for(const [index,facet] of node.die.facets.entries()){
+            if(facet.kind==='value'){faces.push({value:facet.value,p:1/faceCount,index,explosion:facet.explosion,facetReroll:facet.facetReroll});continue;}
             if(facet.kind==='expression'){
               for(const outcome of visit(facet.expression,'scalar').values()){
                 if(Array.isArray(outcome.value))throw new ExpressionError('A facet expression must resolve to one value');
-                faces.push({value:outcome.value,p:outcome.p/faceCount,explosion:facet.explosion});
+                faces.push({value:outcome.value,p:outcome.p/faceCount,index,explosion:facet.explosion,facetReroll:facet.facetReroll});
               }
               continue;
             }
@@ -58,17 +58,25 @@ function exact(root:Node):PMF{
               if(segment.kind==='text'){const next:PMF=new Map();for(const item of textPmf.values())put(next,String(item.value)+segment.text,item.p);textPmf=next;}
               else textPmf=combine(textPmf,visit(segment.expression,'scalar'),(a,b)=>{if(Array.isArray(b))throw new ExpressionError('A text facet expression must resolve to one value');return String(a)+String(b);});
             }
-            for(const item of textPmf.values())faces.push({value:String(item.value).trim(),p:item.p/faceCount,explosion:facet.explosion});
+            for(const item of textPmf.values())faces.push({value:String(item.value).trim(),p:item.p/faceCount,index,explosion:facet.explosion,facetReroll:facet.facetReroll});
           }
-          if(faces.some(face=>face.explosion&&face.explosion.limit===undefined))throw new Error('unbounded exploding distribution');
+          if(faces.some(face=>(face.explosion||face.facetReroll)&&((face.explosion??face.facetReroll)?.limit===undefined)))throw new Error('unbounded modifier distribution');
+          const settled:FaceOutcome[]=[];
+          const settle=(face:FaceOutcome,probability:number,counts:Map<number,number>):void=>{
+            const used=counts.get(face.index)??0,limit=face.facetReroll?.limit;
+            if(limit===undefined||!face.facetReroll||used>=limit){settled.push({...face,p:probability});if(settled.length>MAX_STATES)throw new Error('state limit');return;}
+            const next=new Map(counts);next.set(face.index,used+1);
+            for(const replacement of faces)settle(replacement,probability*replacement.p,next);
+          };
+          for(const face of faces)settle(face,face.p,new Map());
           const one:PMF=new Map();
-          for(const face of faces){
+          for(const face of settled){
             if(!face.explosion){put(one,face.value,face.p);continue;}
             let frontier=[{total:scalar(face.value),p:face.p}];
             for(let depth=1;depth<=face.explosion.limit!;depth++){
-              if(frontier.length*faces.length>MAX_STATES*8)throw new Error('state limit');
+              if(frontier.length*settled.length>MAX_STATES*8)throw new Error('state limit');
               const next:typeof frontier=[];
-              for(const state of frontier)for(const extra of faces){
+              for(const state of frontier)for(const extra of settled){
                 const total=state.total+scalar(extra.value),p=state.p*extra.p;
                 if(extra.explosion&&depth<face.explosion.limit!)next.push({total,p});
                 else put(one,total,p);

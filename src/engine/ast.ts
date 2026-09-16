@@ -16,8 +16,8 @@ export type FacetSpec = (
   | { kind: 'value'; value: Facet }
   | { kind: 'expression'; expression: Node }
   | { kind: 'template'; segments: TemplateSegment[] }
-) & { span: Span; explosion?: Explosion };
-export type Die = { kind: 'standard-die'; sides: Node; explodeHighest?: Explosion } | { kind: 'custom-die'; facets: FacetSpec[] };
+) & { span: Span; explosion?: Explosion; facetReroll?: Explosion };
+export type Die = { kind: 'standard-die'; sides: Node; explodeHighest?: Explosion; rerollLowest?: Explosion } | { kind: 'custom-die'; facets: FacetSpec[] };
 export type Node = (
   | { kind: 'literal'; value: number }
   | { kind: 'dice'; quantity: Node; die: Die; resolution: ResolutionMode; reroll?: Reroll }

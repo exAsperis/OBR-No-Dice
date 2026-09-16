@@ -78,7 +78,7 @@ class Parser {
           const op=this.next();const count=this.number();const source:Node={kind:'pool',items:[result],span:result.span};
           result={kind:'selector',operator:({kh:'highest',kl:'lowest',dh:'drop-highest',dl:'drop-lowest'} as Record<string,Selector>)[mod],count,source:source as Extract<Node,{kind:'pool'}>,span:span(result,count)};continue;
         }
-        if(['r','ro'].includes(mod)){
+        if(['r','ro'].includes(mod)&&!(this.dialect==='nodice'&&mod==='r'&&!['<','<=','=','>','>='].includes(this.at(1).text))){
           if(result.kind!=='dice')this.error('Reroll must precede keep/drop modifiers');
           const r=this.next();let comparator:Comparator='=';
           if(['<','<=','=','>','>='].includes(this.at().text))comparator=this.next().text as Comparator;
@@ -98,6 +98,24 @@ class Parser {
             if(numeric.some(value=>value===undefined))this.error('Trailing explosion requires fixed numeric facets; mark individual facets instead');
             const highest=Math.max(...numeric as number[]);
             for(const face of result.die.facets)if(face.kind==='value'&&face.value===highest){if(face.explosion)this.error('Duplicate explosion marker');face.explosion=explosion;}
+          }
+          result.span.end=this.tokens[this.index-1].end;continue;
+        }
+        if(this.dialect==='nodice'&&mod==='r'){
+          if(result.kind!=='dice')this.error('Facet reroll must precede keep/drop modifiers');
+          const reroll=this.facetReroll()!;
+          if(result.die.kind==='standard-die'){
+            if(result.die.rerollLowest)this.error('Duplicate reroll marker');
+            const sides=result.die.sides;
+            if(sides.kind==='literal'&&Number.isInteger(sides.value)&&sides.value>=1&&sides.value<=1000){
+              const highestExplosion=result.die.explodeHighest;
+              result.die={kind:'custom-die',facets:Array.from({length:sides.value},(_,index)=>({kind:'value' as const,value:index+1,span:result.span,facetReroll:index===0?reroll:undefined,explosion:index+1===sides.value?highestExplosion:undefined}))};
+            }else result.die.rerollLowest=reroll;
+          }else{
+            const numeric=result.die.facets.map(face=>face.kind==='value'&&typeof face.value==='number'?face.value:undefined);
+            if(numeric.some(value=>value===undefined))this.error('Trailing reroll requires fixed numeric facets; mark individual facets instead');
+            const lowest=Math.min(...numeric as number[]);
+            for(const face of result.die.facets)if(face.kind==='value'&&face.value===lowest){if(face.facetReroll)this.error('Duplicate reroll marker');face.facetReroll=reroll;}
           }
           result.span.end=this.tokens[this.index-1].end;continue;
         }
@@ -128,11 +146,11 @@ class Parser {
     let cursor=first.start,last:Span=first;
     while(!this.is(',')&&!this.is('}')&&this.at().kind!=='eof'){
       const current=this.at();
-      if(current.text==='!'){
+      if(current.text==='!'||current.text.toLowerCase()==='r'){
         const next=this.at(1),afterLimit=this.at(2);
         const atFacetEnd=next.text===','||next.text==='}'||(next.kind==='number'&&(afterLimit.text===','||afterLimit.text==='}'));
         const hasText=segments.some(part=>part.kind==='text'&&part.text.trim().length>0)||this.source.slice(cursor,current.start).trim().length>0;
-        if(atFacetEnd&&!hasText&&segments.length===1&&segments[0].kind==='expression')break;
+        if(atFacetEnd&&!hasText&&segments.length===1&&segments[0].kind==='expression'&&(current.text==='!'||this.dialect==='nodice'))break;
         last=this.next();
         if(hasText&&next.kind==='number'&&(afterLimit.text===','||afterLimit.text==='}'))last=this.next();
         continue;
@@ -155,14 +173,18 @@ class Parser {
     if(segments[0]?.kind==='text')segments[0].text=segments[0].text.trimStart();
     if(segments.at(-1)?.kind==='text')(segments.at(-1) as {kind:'text';text:string}).text=(segments.at(-1) as {kind:'text';text:string}).text.trimEnd();
     const meaningful=segments.filter(part=>part.kind==='expression'||part.text.length>0);
-    const explosion=this.explosion();
-    if(explosion&&!this.is(',')&&!this.is('}'))this.error('Explosion marker must end a facet');
-    const facetSpan=span(first,explosion?this.tokens[this.index-1]:last);
-    if(meaningful.length===1){const only=meaningful[0];if(only.kind==='text')return {kind:'value',value:only.text,span:facetSpan,explosion};if(only.expression.kind==='literal')return {kind:'value',value:only.expression.value,span:facetSpan,explosion};if(only.expression.kind==='unary'&&only.expression.value.kind==='literal')return {kind:'value',value:-only.expression.value.value,span:facetSpan,explosion};return {kind:'expression',expression:only.expression,span:facetSpan,explosion};}
-    return {kind:'template',segments:meaningful,span:facetSpan,explosion};
+    const explosion=this.explosion();const facetReroll=this.dialect==='nodice'?this.facetReroll():undefined;
+    if((explosion||facetReroll)&&!this.is(',')&&!this.is('}'))this.error('Facet modifier must end a facet');
+    const facetSpan=span(first,explosion||facetReroll?this.tokens[this.index-1]:last);
+    if(meaningful.length===1){const only=meaningful[0];if(only.kind==='text')return {kind:'value',value:only.text,span:facetSpan,explosion,facetReroll};if(only.expression.kind==='literal')return {kind:'value',value:only.expression.value,span:facetSpan,explosion,facetReroll};if(only.expression.kind==='unary'&&only.expression.value.kind==='literal')return {kind:'value',value:-only.expression.value.value,span:facetSpan,explosion,facetReroll};return {kind:'expression',expression:only.expression,span:facetSpan,explosion,facetReroll};}
+    return {kind:'template',segments:meaningful,span:facetSpan,explosion,facetReroll};
   }
   private explosion():Explosion|undefined{
     if(!this.take('!'))return undefined;
+    return this.at().kind==='number'?{limit:this.number().value}:{};
+  }
+  private facetReroll():Explosion|undefined{
+    if(!this.take('r'))return undefined;
     return this.at().kind==='number'?{limit:this.number().value}:{};
   }
   private selectorName():Selector|undefined{

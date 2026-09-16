@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.7.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.8.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Native expressions
 
@@ -35,6 +35,8 @@ Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm
 | `L2[4d6]`, `DH[4d6]`, `DL2[4d6]` | Keep lowest or drop highest/lowest |
 | `d6!`, `d6!2` | Explode the highest facet, unlimited or at most twice |
 | `d{1,2,3,4,5!,6!}` | Two independently exploding facets |
+| `d6r`, `2d6r1` | Reroll the lowest facet, without a limit or at most once |
+| `d{1r,2r1,3,4,5,6}` | Reroll 1s without a limit and 2s at most once |
 | `H[s2d6,d8]` | Compare a two-die sum with one d8 |
 | `H(d4)[5d6]` | Roll d4 once to determine how many to keep |
 | `(d4)d6`, `d(d{4,6,8})` | Dynamic quantity and die size |
@@ -45,6 +47,8 @@ Unmarked dice retain `inferred` resolution in the AST. They resolve to a sum in 
 Each custom die facet is an equally likely branch. A branch may be a literal value, a dice expression, or text with one or more embedded expressions. No Dice chooses the branch first, then evaluates only that branch. `d{d4,d6+1,2d8}` therefore has an exact distribution equal to a one-third mixture of those three expression distributions. An inclusive range such as `d{0..100}` expands to 101 ordinary numeric facets; range bounds must be ascending integers and a custom die may have at most 1,000 facets. Text results such as `A bag of 42 gold pieces` remain categorical. A chosen branch with unlimited explosion uses the labeled estimate. Repeating a branch weights it just like repeating a literal facet. Text templates have no fixed symbolic rank, so highest/lowest selectors reject them rather than inventing an order.
 
 Explosion is a property of a **numeric facet**. A marked facet adds another result from the same die; another marked facet continues the chain. `d6!` abbreviates `d{1,2,3,4,5,6!}`, and `d6!2` abbreviates `d{1,2,3,4,5,6!2}`. The `2` permits at most two additional rolls after the initial result, even if the second and third facets are marked. With differently limited facets, the initially selected facet sets the cap for that chain. Limited explosions have exact finite distributions when manageable; unlimited explosions are estimated. A die with no possible termination, such as `d1!`, is rejected. In symbolic or text facets, `!` is text: `d{Miss!,Hit}` returns `Miss!`. An embedded numeric expression can still explode before rendering text, as in `d{d4! dogs}`.
+
+Facet rerolls replace the result instead of adding to it. `d6r` abbreviates `d{1r,2,3,4,5,6}`. A positive integer after `r` limits rerolls of that marked facet per die result: `d{1r,2r1,3,4,5,6}` keeps rerolling 1s, but rerolls a 2 at most once. If the replacement is another marked facet, its own limit applies. Each die in `2d6r` tracks its rerolls separately. Bounded rerolls have exact distributions when manageable; unlimited rerolls are estimated. `d1r` and other dice with no terminating facet are rejected. Native `d6r2` means at most two rerolls of 1; use `d6r=2` for the comparison based reroll of 2. This changes the native interpretation of bare `d6r2` from the previous Roll20 fallback meaning.
 
 The notation panel shows the entered text, canonical short form, readable long form, and fully expanded long form. Short form collapses conventional facets to `dN` and omits selector count `1`; readable long form keeps conventional `dN` compact; expanded long form spells out all conventional facets. The two formatters serialize the AST independently. `H3[2d8]`, symbolic sums, nonpositive dice counts, and impossible dynamic structural values produce diagnostics rather than clamping or reinterpretation.
 

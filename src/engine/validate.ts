@@ -87,11 +87,16 @@ export function validate(root:Node):Diagnostic[]{
         if(node.resolution==='sum'&&typeOf(node)!=='numeric')issue(node,'SYMBOLIC_SUM','Symbolic dice cannot be summed');
         const explosions=node.die.kind==='standard-die'?[node.die.explodeHighest]:node.die.facets.map(f=>f.explosion);
         for(const explosion of explosions)if(explosion?.limit!==undefined&&(!Number.isInteger(explosion.limit)||explosion.limit<1||explosion.limit>100))issue(node,'INVALID_EXPLOSION_LIMIT','Explosion limit must be an integer from 1 to 100');
+        const facetRerolls=node.die.kind==='standard-die'?[node.die.rerollLowest]:node.die.facets.map(f=>f.facetReroll);
+        for(const reroll of facetRerolls)if(reroll?.limit!==undefined&&(!Number.isInteger(reroll.limit)||reroll.limit<1||reroll.limit>100))issue(node,'INVALID_REROLL_LIMIT','Reroll limit must be an integer from 1 to 100');
         if(node.die.kind==='standard-die'&&node.die.explodeHighest?.limit===undefined&&node.die.explodeHighest&&possibleNumbers(node.die.sides)?.includes(1))issue(node,'NO_TERMINATION','An unlimited exploding d1 cannot terminate');
         if(node.die.kind==='custom-die'){
           for(const facet of node.die.facets)if(facet.explosion&&(facet.kind==='template'||(facet.kind==='value'&&typeof facet.value!=='number')||(facet.kind==='expression'&&typeOf(facet.expression)!=='numeric')))issue(node,'SYMBOLIC_EXPLOSION','Only numerical facets can explode');
+          for(const facet of node.die.facets)if(facet.facetReroll&&(facet.kind==='template'||(facet.kind==='value'&&typeof facet.value!=='number')||(facet.kind==='expression'&&typeOf(facet.expression)!=='numeric')))issue(node,'SYMBOLIC_REROLL','Only numerical facets can reroll');
           if(node.die.facets.every(f=>f.explosion)&&node.die.facets.some(f=>f.explosion?.limit===undefined))issue(node,'NO_TERMINATION','An unlimited die whose every facet explodes cannot terminate');
+          if(node.die.facets.every(f=>f.facetReroll?.limit===undefined&&f.facetReroll))issue(node,'NO_TERMINATION','An unlimited die whose every facet rerolls cannot terminate');
         }
+        if(node.die.kind==='standard-die'&&node.die.rerollLowest?.limit===undefined&&node.die.rerollLowest&&possibleNumbers(node.die.sides)?.includes(1))issue(node,'NO_TERMINATION','An unlimited rerolling d1 cannot terminate');
         if(node.reroll&&typeOf(node)!=='numeric')issue(node,'SYMBOLIC_REROLL','Rerolls require numeric facets');
         if(node.reroll&&!node.reroll.once){
           const {comparator,target}=node.reroll;
