@@ -1,4 +1,5 @@
 import type { Explosion, FacetSpec, Node, Selector } from './ast';
+import { formatInterpretationCondition } from './interpretation';
 export type FormatStyle='short'|'longReadable'|'longExpanded';
 const selectorShort:Record<Selector,string>={highest:'H',lowest:'L','drop-highest':'DH','drop-lowest':'DL'};
 const selectorLong:Record<Selector,string>={highest:'highest',lowest:'lowest','drop-highest':'drop highest','drop-lowest':'drop lowest'};
@@ -64,6 +65,7 @@ function format(node:Node,style:FormatStyle,parent=0):string{
       output=style==='short'?`${selectorShort[node.operator]}${count}[${items}]`:`${selectorLong[node.operator]} ${count||'1'} ${node.operator.startsWith('drop')?'from':'of'} [${items}]`;
       break;
     }
+    case 'interpret':output=`${format(node.expression,style)} | ${node.rules.map(rule=>`${formatInterpretationCondition(rule.condition)}:${rule.label}`).join('; ')}`;break;
   }
   return precedence(node)<parent?`(${output})`:output;
 }

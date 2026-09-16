@@ -1,6 +1,8 @@
 import { ExpressionError, type Explosion, type Facet, type Node } from './ast';
 import { formatFacetShort, formatShort } from './format';
 import { resolveSemantics, type SemanticPlan } from './semantics';
+import { PresentationRecorder } from './presentation';
+import { matchesInterpretation } from './interpretation';
 
 export interface Rng { integer(maxExclusive:number):number }
 export const cryptoRng:Rng={integer(maxExclusive){
@@ -11,7 +13,7 @@ export const cryptoRng:Rng={integer(maxExclusive){
   return value%maxExclusive;
 }};
 export type Value=Facet|Facet[];
-export interface Evaluation {value:Value;trace:string[]}
+export interface Evaluation {value:Value;trace:string[];stages:string[];interpretation?:string}
 type Context='scalar'|'pool-source';
 const show=(value:Value)=>Array.isArray(value)?`[${value.join(', ')}]`:String(value);
 const number=(value:Value):number=>{if(typeof value!=='number'||!Number.isFinite(value))throw new ExpressionError('This operation requires a numeric scalar');return value;};
@@ -24,20 +26,27 @@ function rankMap(node:Node):Map<string,number>{
   if(node.kind==='selector')return rankMap(node.source);
   return new Map();
 }
-function evaluateNode(node:Node,rng:Rng,context:Context,plan:SemanticPlan):Evaluation{
+function evaluateNode(node:Node,rng:Rng,context:Context,plan:SemanticPlan,presentation:PresentationRecorder,showStages:boolean):Evaluation{
   switch(node.kind){
-    case 'literal':return {value:node.value,trace:[]};
-    case 'group':return evaluateNode(node.value,rng,context,plan);
-    case 'unary':{const inner=evaluateNode(node.value,rng,'scalar',plan);const value=-number(inner.value);return {value,trace:[...inner.trace,`−${show(inner.value)} → ${value}`]};}
+    case 'interpret':{
+      const result=evaluateNode(node.expression,rng,'scalar',plan,presentation,showStages);
+      const value=number(result.value);
+      const label=node.rules.find(rule=>matchesInterpretation(rule.condition,value))?.label;
+      return {...result,interpretation:label};
+    }
+    case 'literal':return {value:node.value,trace:[],stages:presentation.stages};
+    case 'group':return evaluateNode(node.value,rng,context,plan,presentation,showStages);
+    case 'unary':{const inner=evaluateNode(node.value,rng,'scalar',plan,presentation,showStages);const value=-number(inner.value);presentation.replace(node,String(value));if(showStages&&!presentation.isRoot(node))presentation.show();return {value,trace:[...inner.trace,`−${show(inner.value)} → ${value}`],stages:presentation.stages};}
     case 'binary':{
-      const left=evaluateNode(node.left,rng,'scalar',plan),right=evaluateNode(node.right,rng,'scalar',plan);const a=number(left.value),b=number(right.value);
+      const left=evaluateNode(node.left,rng,'scalar',plan,presentation,showStages),right=evaluateNode(node.right,rng,'scalar',plan,presentation,showStages);const a=number(left.value),b=number(right.value);
       const value=node.op==='+'?a+b:node.op==='-'?a-b:node.op==='*'?a*b:a/b;
       if(!Number.isFinite(value))throw new ExpressionError('Non-finite arithmetic result');
-      return {value,trace:[...left.trace,...right.trace,`${a} ${node.op} ${b} → ${value}`]};
+      presentation.replace(node,String(value));if(showStages&&!presentation.isRoot(node))presentation.show();
+      return {value,trace:[...left.trace,...right.trace,`${a} ${node.op} ${b} → ${value}`],stages:presentation.stages};
     }
     case 'dice':{
-      const quantity=evaluateNode(node.quantity,rng,'scalar',plan);const count=positiveInteger(quantity.value,'Dice quantity',100);
-      const sides=node.die.kind==='standard-die'?evaluateNode(node.die.sides,rng,'scalar',plan):undefined;
+      const quantity=evaluateNode(node.quantity,rng,'scalar',plan,presentation,false);const count=positiveInteger(quantity.value,'Dice quantity',100);
+      const sides=node.die.kind==='standard-die'?evaluateNode(node.die.sides,rng,'scalar',plan,presentation,false):undefined;
       const faceCount=node.die.kind==='custom-die'?node.die.facets.length:positiveInteger(sides!.value,'Die size',1000);
       if(!faceCount)throw new ExpressionError('A die must have at least one facet');
       const results:Facet[]=[];const trace=[...quantity.trace,...(sides?.trace??[])];
@@ -48,13 +57,13 @@ function evaluateNode(node:Node,rng:Rng,context:Context,plan:SemanticPlan):Evalu
         if(facet.kind==='value')return {value:facet.value,explosion:facet.explosion};
         trace.push(`facet ${index+1}/${faceCount} → ${formatFacetShort(facet)}`);
         if(facet.kind==='expression'){
-          const result=evaluateNode(facet.expression,rng,'scalar',plan);trace.push(...result.trace);
+          const result=evaluateNode(facet.expression,rng,'scalar',plan,presentation,false);trace.push(...result.trace);
           if(Array.isArray(result.value))throw new ExpressionError('A facet expression must resolve to one value');
           trace.push(`facet result → ${result.value}`);return {value:result.value,explosion:facet.explosion};
         }
         const rendered=facet.segments.map(segment=>{
           if(segment.kind==='text')return segment.text;
-          const result=evaluateNode(segment.expression,rng,'scalar',plan);trace.push(...result.trace);
+          const result=evaluateNode(segment.expression,rng,'scalar',plan,presentation,false);trace.push(...result.trace);
           if(Array.isArray(result.value))throw new ExpressionError('A text facet expression must resolve to one value');
           return String(result.value);
         }).join('').trim();
@@ -81,26 +90,29 @@ function evaluateNode(node:Node,rng:Rng,context:Context,plan:SemanticPlan):Evalu
       }
       trace.unshift(`${formatShort(node)} → ${show(results)}`);
       const resolution=plan.modeFor(node);
-      if(resolution==='pool')return {value:results,trace};
-      if(results.every(v=>typeof v==='number')){const value=results.reduce<number>((a,b)=>a+(b as number),0);return {value,trace:[...trace,`sum → ${value}`]};}
+      presentation.replace(node,show(results));if(showStages)presentation.show();
+      if(resolution==='pool')return {value:results,trace,stages:presentation.stages};
+      if(results.every(v=>typeof v==='number')){const value=results.reduce<number>((a,b)=>a+(b as number),0);presentation.replace(node,String(value));if(showStages)presentation.show();return {value,trace:[...trace,`sum → ${value}`],stages:presentation.stages};}
       if(node.resolution==='sum')throw new ExpressionError('Symbolic dice cannot be summed');
-      if(results.length===1)return {value:results[0],trace};
-      return {value:results,trace};
+      if(results.length===1){presentation.replace(node,String(results[0]));return {value:results[0],trace,stages:presentation.stages};}
+      return {value:results,trace,stages:presentation.stages};
     }
     case 'pool':{
-      const evaluated=node.items.map(item=>evaluateNode(item,rng,'pool-source',plan));
+      const evaluated=node.items.map(item=>evaluateNode(item,rng,'pool-source',plan,presentation,showStages));
       const value=evaluated.flatMap(e=>members(e.value));
-      return {value,trace:[...evaluated.flatMap(e=>e.trace),`pool → ${show(value)}`]};
+      presentation.replace(node,show(value));if(showStages)presentation.show();
+      return {value,trace:[...evaluated.flatMap(e=>e.trace),`pool → ${show(value)}`],stages:presentation.stages};
     }
     case 'resolve':{
-      const inner=evaluateNode(node.value,rng,'pool-source',plan);
+      const inner=evaluateNode(node.value,rng,'pool-source',plan,presentation,showStages);
       if(node.resolution==='pool')return inner;
       const value=members(inner.value).reduce<number>((a,b)=>a+number(b),0);
-      return {value,trace:[...inner.trace,`sum → ${value}`]};
+      presentation.replace(node,String(value));if(showStages&&!presentation.isRoot(node))presentation.show();
+      return {value,trace:[...inner.trace,`sum → ${value}`],stages:presentation.stages};
     }
     case 'selector':{
-      const countResult=evaluateNode(node.count,rng,'scalar',plan);const count=positiveInteger(countResult.value,'Selection count',100);
-      const source=evaluateNode(node.source,rng,'pool-source',plan);const values=members(source.value);
+      const countResult=evaluateNode(node.count,rng,'scalar',plan,presentation,false);const count=positiveInteger(countResult.value,'Selection count',100);
+      const source=evaluateNode(node.source,rng,'pool-source',plan,presentation,false);const values=members(source.value);
       if(count>values.length)throw new ExpressionError(`Cannot select or drop ${count} results from a pool of ${values.length}`);
       const ranks=rankMap(node.source);
       const rank=(v:Facet)=>typeof v==='number'?v:ranks.get(v);
@@ -109,10 +121,12 @@ function evaluateNode(node:Node,rng:Rng,context:Context,plan:SemanticPlan):Evalu
       const selected=node.operator==='highest'?sorted.slice(-count):node.operator==='lowest'?sorted.slice(0,count):node.operator==='drop-highest'?sorted.slice(0,sorted.length-count):sorted.slice(count);
       const kept=selected.sort((a,b)=>a.index-b.index).map(x=>x.value);
       const trace=[...countResult.trace,...source.trace,`${formatShort(node)} → ${show(kept)}`];
-      if(kept.every(v=>typeof v==='number')){const value=kept.reduce<number>((a,b)=>a+(b as number),0);return {value,trace:[...trace,`sum → ${value}`]};}
-      return {value:kept.length===1?kept[0]:kept,trace};
+      presentation.replace(node.count,String(count));presentation.replace(node.source,values.map(String).join(','));if(showStages)presentation.show();
+      presentation.replace(node,show(kept));if(showStages)presentation.show();
+      if(kept.every(v=>typeof v==='number')){const value=kept.reduce<number>((a,b)=>a+(b as number),0);presentation.replace(node,String(value));if(showStages&&!presentation.isRoot(node))presentation.show();return {value,trace:[...trace,`sum → ${value}`],stages:presentation.stages};}
+      return {value:kept.length===1?kept[0]:kept,trace,stages:presentation.stages};
     }
   }
 }
-export function evaluate(node:Node,rng:Rng=cryptoRng):Evaluation{return evaluateNode(node,rng,'scalar',resolveSemantics(node));}
+export function evaluate(node:Node,rng:Rng=cryptoRng,recordStages=true):Evaluation{const presentation=new PresentationRecorder(node,recordStages);return evaluateNode(node,rng,'scalar',resolveSemantics(node),presentation,recordStages);}
 export const roll=evaluate;

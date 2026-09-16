@@ -11,7 +11,7 @@ export class FairnessSampler {
 
   sample(amount: number): FairnessSnapshot {
     for (let i = 0; i < amount; i++) {
-      const value = roll(this.expression, this.rng).value;
+      const value = roll(this.expression, this.rng, false).value;
       const key = JSON.stringify(value);
       const previous = this.counts.get(key);
       if (previous) previous.count++;

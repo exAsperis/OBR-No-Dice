@@ -10,6 +10,7 @@ const rng=(...values:number[]):Rng=>{let i=0;return {integer:n=>values[i++]%n};}
 function semantic(node:Node):unknown{
   switch(node.kind){
     case 'literal':return ['literal',node.value];
+    case 'interpret':return ['interpret',semantic(node.expression),node.rules.map(rule=>[rule.condition,rule.label])];
     case 'group':return semantic(node.value);
     case 'unary':return ['unary',node.op,semantic(node.value)];
     case 'binary':return ['binary',node.op,semantic(node.left),semantic(node.right)];
@@ -38,7 +39,8 @@ const valid=[
   'd(d{4,6,8})','(d4)d(d{4,6,8})',
   'die{1,2,3,4,5,6}','highest 2 of [3 die{1,2,3,4}]','highest 2 of [pool 3d4]',
   'highest 1 of [sum 2d6,d8]','drop highest 2 from [5d6]',
-  'pool(d4,d6)','sum(d4,d6)','(2+3)*d6'
+  'pool(d4,d6)','sum(d4,d6)','(2+3)*d6',
+  '2d6 | 6-:Fail; 7-9:Partial success; 10+:Success'
 ];
 describe('unified notation',()=>{
   it.each(valid)('round trips %s through short and both long forms',input=>{

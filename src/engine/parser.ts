@@ -1,6 +1,7 @@
 import { ExpressionError, type Comparator, type Diagnostic, type Dialect, type Explosion, type FacetSpec, type Node, type ResolutionMode, type Selector, type Span } from './ast';
 import { tokenize, type Token } from './tokenizer';
 import { validate } from './validate';
+import { parseInterpretationTable } from './interpretation';
 
 const span=(a:Span|Node,b:Span|Node):Span=>({start:'span'in a?a.span.start:a.start,end:'span'in b?b.span.end:b.end});
 const lit=(value:number,where:Span):Extract<Node,{kind:'literal'}>=>({kind:'literal',value,span:where});
@@ -167,9 +168,24 @@ class Parser {
 }
 
 export interface ParsedDocument { source:string; tokens:Token[]; ast:Node; diagnostics:Diagnostic[] }
+function interpretationPipe(source:string):number{
+  let braces=0,brackets=0,parentheses=0;
+  for(let index=0;index<source.length;index++){
+    const char=source[index];
+    if(char==='|'&&braces===0&&brackets===0&&parentheses===0)return index;
+    if(char==='{')braces++;else if(char==='}')braces--;
+    else if(char==='[')brackets++;else if(char===']')brackets--;
+    else if(char==='(')parentheses++;else if(char===')')parentheses--;
+  }
+  return -1;
+}
 export function parseSyntax(source:string,dialect:Dialect='nodice'):ParsedDocument{
   if(!source.trim())throw new ExpressionError('Enter an expression',true,{severity:'error',code:'EMPTY',message:'Enter an expression',start:0,end:0});
-  const tokens=tokenize(source);return {source,tokens,ast:new Parser(tokens,dialect,source).parse(),diagnostics:[]};
+  const pipe=interpretationPipe(source),expression=pipe<0?source:source.slice(0,pipe);
+  const tokens=tokenize(expression);
+  const inner=new Parser(tokens,dialect,expression).parse();
+  const ast:Node=pipe<0?inner:{kind:'interpret',expression:inner,rules:parseInterpretationTable(source.slice(pipe+1),pipe+1),span:{start:inner.span.start,end:source.length}};
+  return {source,tokens,ast,diagnostics:[]};
 }
 export function parseDocument(source:string,dialect:Dialect='nodice'):ParsedDocument{const document=parseSyntax(source,dialect);document.diagnostics=validate(document.ast);return document;}
 export function parse(source:string,dialect:Dialect='nodice'):Node{const document=parseDocument(source,dialect);const error=document.diagnostics[0];if(error)throw new ExpressionError(`${error.message} at position ${error.start+1}`,false,error);return document.ast;}

@@ -8,6 +8,7 @@ export function resolveSemantics(root:Node):SemanticPlan{
   const walk=(node:Node,context:EvaluationContext):void=>{
     switch(node.kind){
       case 'literal':break;
+      case 'interpret':walk(node.expression,'scalar');break;
       case 'group':walk(node.value,context);break;
       case 'unary':walk(node.value,'scalar');break;
       case 'binary':walk(node.left,'scalar');walk(node.right,'scalar');break;

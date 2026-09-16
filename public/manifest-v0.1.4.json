@@ -6,6 +6,7 @@
   "author": "ex Asperis",
   "homepage_url": "https://github.com/exAsperis/No-Dice",
   "icon": "https://no-dice.ex-asperis.com/icon.svg?v=0.1.4",
+  "background_url": "https://no-dice.ex-asperis.com/background.html?v=0.1.4",
   "action": {
     "title": "No Dice",
     "icon": "https://no-dice.ex-asperis.com/icon.svg?v=0.1.4",

@@ -6,6 +6,7 @@
   "author": "ex Asperis",
   "homepage_url": "http://localhost:5173/",
   "icon": "http://localhost:5173/icon.svg",
+  "background_url": "http://localhost:5173/background.html",
   "action": {
     "title": "No Dice (Local)",
     "icon": "http://localhost:5173/icon.svg",

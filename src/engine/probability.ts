@@ -27,6 +27,7 @@ function exact(root:Node):PMF{
     const cached=cache.get(node)?.get(context);if(cached)return cached;
     let result:PMF;
     switch(node.kind){
+      case 'interpret':result=visit(node.expression,'scalar');break;
       case 'literal':result=only(node.value);break;
       case 'group':result=visit(node.value,context);break;
       case 'unary':{result=new Map();for(const item of visit(node.value,'scalar').values())put(result,-scalar(item.value),item.p);break;}
@@ -119,7 +120,7 @@ export function distribution(node:Node):Distribution{
   try{pmf=exact(node);}catch(error){
     if(error instanceof ExpressionError)throw error;
     isExact=false;pmf=new Map();const rng={integer:(n:number)=>Math.floor(Math.random()*n)};
-    for(let i=0;i<ESTIMATE_TRIALS;i++)put(pmf,roll(node,rng).value,1/ESTIMATE_TRIALS);
+    for(let i=0;i<ESTIMATE_TRIALS;i++)put(pmf,roll(node,rng,false).value,1/ESTIMATE_TRIALS);
   }
   const entries=[...pmf.values()].map(x=>({value:x.value,probability:x.p})).sort((a,b)=>typeof a.value==='number'&&typeof b.value==='number'?a.value-b.value:String(a.value).localeCompare(String(b.value)));
   const numeric=entries.every(x=>typeof x.value==='number');

@@ -15,6 +15,7 @@ function typeOf(node:Node):ValueType {
     case 'pool': {const types=new Set(node.items.map(typeOf));return types.size===1?[...types][0]:'mixed';}
     case 'resolve':return node.resolution==='sum'?'numeric':typeOf(node.value);
     case 'selector':return typeOf(node.source);
+    case 'interpret':return typeOf(node.expression);
   }
 }
 function possibleNumbers(node:Node):number[]|undefined{
@@ -63,6 +64,7 @@ export function validate(root:Node):Diagnostic[]{
   const check=(node:Node):void=>{
     switch(node.kind){
       case 'literal':break;
+      case 'interpret':check(node.expression);if(typeOf(node.expression)!=='numeric'||explicitPool(node.expression))issue(node.expression,'NONNUMERIC_INTERPRETATION','Interpretation requires one numeric result');break;
       case 'group':case 'unary':check(node.value);if(node.kind==='unary'){if(typeOf(node.value)!=='numeric')issue(node,'SYMBOLIC_ARITHMETIC','Symbolic values cannot be used in arithmetic');if(explicitPool(node.value))issue(node,'POOL_ARITHMETIC','Explicit pools require sum before arithmetic');}break;
       case 'binary':check(node.left);check(node.right);if(typeOf(node.left)!=='numeric'||typeOf(node.right)!=='numeric')issue(node,'SYMBOLIC_ARITHMETIC','Symbolic values cannot be used in arithmetic');if(explicitPool(node.left)||explicitPool(node.right))issue(node,'POOL_ARITHMETIC','Explicit pools require sum before arithmetic');break;
       case 'dice':{

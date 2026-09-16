@@ -6,6 +6,11 @@ export type Comparator = '<' | '<=' | '=' | '>' | '>=';
 export interface Span { start: number; end: number }
 export interface Reroll { once: boolean; comparator: Comparator; target: number }
 export interface Explosion { limit?: number }
+export type InterpretationCondition =
+  | { kind: 'comparison'; operator: '<' | '<=' | '>' | '>='; threshold: number }
+  | { kind: 'range'; minimum: number; maximum: number }
+  | { kind: 'exact'; value: number };
+export interface InterpretationRule { condition: InterpretationCondition; label: string; span: Span }
 export type TemplateSegment = { kind: 'text'; text: string } | { kind: 'expression'; expression: Node };
 export type FacetSpec = (
   | { kind: 'value'; value: Facet }
@@ -22,6 +27,7 @@ export type Node = (
   | { kind: 'pool'; items: Node[] }
   | { kind: 'resolve'; resolution: 'pool' | 'sum'; value: Node }
   | { kind: 'selector'; operator: Selector; count: Node; source: Extract<Node, { kind: 'pool' }> }
+  | { kind: 'interpret'; expression: Node; rules: InterpretationRule[] }
 ) & { span: Span };
 
 export interface Diagnostic extends Span { severity: 'error'; code: string; message: string }
