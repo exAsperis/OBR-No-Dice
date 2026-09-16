@@ -1,10 +1,11 @@
-import { ExpressionError, type Facet, type Node } from './ast';
+import { ExpressionError, type Explosion, type Facet, type Node } from './ast';
 import { roll, type Value } from './evaluate';
 import { resolveSemantics } from './semantics';
 export const MAX_STATES=30000;
 export const ESTIMATE_TRIALS=20000;
 export interface Distribution { entries:{value:Value;probability:number}[];exact:boolean;trials?:number;mean?:number;mode?:Value;range?:[number,number] }
 type PMF=Map<string,{value:Value;p:number}>;
+type FaceOutcome={value:Facet;p:number;explosion?:Explosion};
 type Context='scalar'|'pool-source';
 const key=(v:Value)=>JSON.stringify(v);
 const put=(out:PMF,value:Value,p:number)=>{const k=key(value),old=out.get(k);out.set(k,{value,p:(old?.p??0)+p});if(out.size>MAX_STATES)throw new Error('state limit');};
@@ -13,7 +14,7 @@ const scalar=(value:Value):number=>{if(typeof value!=='number')throw new Express
 const members=(value:Value):Facet[]=>Array.isArray(value)?value:[value];
 const combine=(a:PMF,b:PMF,fn:(x:Value,y:Value)=>Value):PMF=>{if(a.size*b.size>MAX_STATES*8)throw new Error('state limit');const out:PMF=new Map();for(const x of a.values())for(const y of b.values())put(out,fn(x.value,y.value),x.p*y.p);return out;};
 function ranks(node:Node):Map<string,number>{
-  if(node.kind==='dice'&&node.die.kind==='custom-die'){const ranks=new Map<string,number>();for(const value of node.die.facets)if(typeof value==='string'&&!ranks.has(value))ranks.set(value,ranks.size);return ranks;}
+  if(node.kind==='dice'&&node.die.kind==='custom-die'){const ranks=new Map<string,number>();for(const facet of node.die.facets)if(facet.kind==='value'&&typeof facet.value==='string'&&!ranks.has(facet.value))ranks.set(facet.value,ranks.size);return ranks;}
   if(node.kind==='pool'){const result=new Map<string,number>();for(const child of node.items)for(const [k,v] of ranks(child))result.set(k,v);return result;}
   if(node.kind==='group'||node.kind==='resolve')return ranks(node.value);
   if(node.kind==='selector')return ranks(node.source);
@@ -31,15 +32,49 @@ function exact(root:Node):PMF{
       case 'unary':{result=new Map();for(const item of visit(node.value,'scalar').values())put(result,-scalar(item.value),item.p);break;}
       case 'binary':result=combine(visit(node.left,'scalar'),visit(node.right,'scalar'),(a,b)=>{const x=scalar(a),y=scalar(b),n=node.op==='+'?x+y:node.op==='-'?x-y:node.op==='*'?x*y:x/y;if(!Number.isFinite(n))throw new ExpressionError('Non-finite arithmetic result');return n;});break;
       case 'dice':{
-        if(node.explode||node.reroll)throw new Error('unbounded or reroll distribution');
+        if(node.reroll)throw new Error('reroll distribution');
         result=new Map();const counts=visit(node.quantity,'scalar');
         const sides=node.die.kind==='standard-die'?visit(node.die.sides,'scalar'):only(0);
         for(const count of counts.values())for(const side of sides.values()){
           const n=scalar(count.value),s=scalar(side.value);
           if(!Number.isInteger(n)||n<1||n>100)throw new ExpressionError('Invalid dice quantity');
-          const faces=node.die.kind==='custom-die'?node.die.facets:Array.from({length:s},(_,i)=>i+1);
-          if(!faces.length||faces.length>1000)throw new ExpressionError('Invalid die size');
-          const one:PMF=new Map();for(const face of faces)put(one,face,1/faces.length);
+          const faceCount=node.die.kind==='custom-die'?node.die.facets.length:s;
+          if(!Number.isInteger(faceCount)||faceCount<1||faceCount>1000)throw new ExpressionError('Invalid die size');
+          const faces:FaceOutcome[]=[];
+          if(node.die.kind==='standard-die')for(let face=1;face<=faceCount;face++)faces.push({value:face,p:1/faceCount,explosion:face===faceCount?node.die.explodeHighest:undefined});
+          else for(const facet of node.die.facets){
+            if(facet.kind==='value'){faces.push({value:facet.value,p:1/faceCount,explosion:facet.explosion});continue;}
+            if(facet.kind==='expression'){
+              for(const outcome of visit(facet.expression,'scalar').values()){
+                if(Array.isArray(outcome.value))throw new ExpressionError('A facet expression must resolve to one value');
+                faces.push({value:outcome.value,p:outcome.p/faceCount,explosion:facet.explosion});
+              }
+              continue;
+            }
+            let textPmf=only('');
+            for(const segment of facet.segments){
+              if(segment.kind==='text'){const next:PMF=new Map();for(const item of textPmf.values())put(next,String(item.value)+segment.text,item.p);textPmf=next;}
+              else textPmf=combine(textPmf,visit(segment.expression,'scalar'),(a,b)=>{if(Array.isArray(b))throw new ExpressionError('A text facet expression must resolve to one value');return String(a)+String(b);});
+            }
+            for(const item of textPmf.values())faces.push({value:String(item.value).trim(),p:item.p/faceCount,explosion:facet.explosion});
+          }
+          if(faces.some(face=>face.explosion&&face.explosion.limit===undefined))throw new Error('unbounded exploding distribution');
+          const one:PMF=new Map();
+          for(const face of faces){
+            if(!face.explosion){put(one,face.value,face.p);continue;}
+            let frontier=[{total:scalar(face.value),p:face.p}];
+            for(let depth=1;depth<=face.explosion.limit!;depth++){
+              if(frontier.length*faces.length>MAX_STATES*8)throw new Error('state limit');
+              const next:typeof frontier=[];
+              for(const state of frontier)for(const extra of faces){
+                const total=state.total+scalar(extra.value),p=state.p*extra.p;
+                if(extra.explosion&&depth<face.explosion.limit!)next.push({total,p});
+                else put(one,total,p);
+              }
+              if(next.length>MAX_STATES)throw new Error('state limit');
+              frontier=next;if(!frontier.length)break;
+            }
+          }
           let rolls=only([]);
           for(let i=0;i<n;i++)rolls=combine(rolls,one,(a,b)=>[...members(a),b as Facet]);
           const resolution=plan.modeFor(node);

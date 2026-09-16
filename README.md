@@ -23,18 +23,26 @@ Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm
 | `d{0,1}`, `d{-2,-1,0,1,2}` | Numeric arbitrary dice |
 | `d{0.5,1,1.5}`, `d{1/2,1}` | Decimal or rational facets |
 | `d{Miss,Miss,Hit,Crit}` | Symbolic facets; duplicates add weight |
+| `d{d4,d6+1,2d8}` | Choose one facet, then evaluate its expression |
+| `d{d6 cats,d4! dogs,3 naughty pigeons}` | Evaluated facets rendered as text |
+| `d{A bag of d100 gold pieces}` | An expression embedded within a phrase |
 | `2d6+4`, `(d4+2)*3` | Arithmetic and grouping |
 | `p2d6`, `pool 2d6` | Preserve individual values |
 | `s2d6`, `sum 2d6` | Explicitly sum numeric values |
 | `pool(d4,d6)`, `sum(d4,d6)` | Legacy function forms for multiple sources |
 | `H[2d20]`, `H3[4d6]` | Keep highest one or N |
 | `L2[4d6]`, `DH[4d6]`, `DL2[4d6]` | Keep lowest or drop highest/lowest |
-| `d6!` | Exploding die |
+| `d6!`, `d6!2` | Explode the highest facet, unlimited or at most twice |
+| `d{1,2,3,4,5!,6!}` | Two independently exploding facets |
 | `H[s2d6,d8]` | Compare a two-die sum with one d8 |
 | `H(d4)[5d6]` | Roll d4 once to determine how many to keep |
 | `(d4)d6`, `d(d{4,6,8})` | Dynamic quantity and die size |
 
 Unmarked dice retain `inferred` resolution in the AST. They resolve to a sum in ordinary numeric expressions and to individual results inside a selector's bracketed pool. Explicit `p`/`pool` or `s`/`sum` overrides that inference. Thus `H[2d6,d8]` selects from three individual rolls, while `H[s2d6,d8]` selects from two values. Commas inside `[...]` concatenate pool sources. Numeric selectors sum retained values; a single selected symbol remains symbolic. Symbolic facets cannot participate in arithmetic, and duplicate symbolic facets keep the rank of their first appearance. Parentheses only group expressions.
+
+Each custom die facet is an equally likely branch. A branch may be a literal value, a dice expression, or text with one or more embedded expressions. No Dice chooses the branch first, then evaluates only that branch. `d{d4,d6+1,2d8}` therefore has an exact distribution equal to a one-third mixture of those three expression distributions. Text results such as `A bag of 42 gold pieces` remain categorical. A chosen branch with unlimited explosion uses the labeled estimate. Repeating a branch weights it just like repeating a literal facet. Text templates have no fixed symbolic rank, so highest/lowest selectors reject them rather than inventing an order.
+
+Explosion is a property of a **numeric facet**. A marked facet adds another result from the same die; another marked facet continues the chain. `d6!` abbreviates `d{1,2,3,4,5,6!}`, and `d6!2` abbreviates `d{1,2,3,4,5,6!2}`. The `2` permits at most two additional rolls after the initial result, even if the second and third facets are marked. With differently limited facets, the initially selected facet sets the cap for that chain. Limited explosions have exact finite distributions when manageable; unlimited explosions are estimated. A die with no possible termination, such as `d1!`, is rejected. In symbolic or text facets, `!` is text: `d{Miss!,Hit}` returns `Miss!`. An embedded numeric expression can still explode before rendering text, as in `d{d4! dogs}`.
 
 The notation panel shows the entered text, canonical short form, readable long form, and fully expanded long form. Short form collapses conventional facets to `dN` and omits selector count `1`; readable long form keeps conventional `dN` compact; expanded long form spells out all conventional facets. The two formatters serialize the AST independently. `H3[2d8]`, symbolic sums, nonpositive dice counts, and impossible dynamic structural values produce diagnostics rather than clamping or reinterpretation.
 
@@ -44,7 +52,7 @@ The Roll20 dialect selector supports common `NdM`, arithmetic, parentheses, `khN
 
 Valid expressions are parsed 150 ms after typing stops, then evaluated in a Web Worker. Finite distributions are exact while the state space remains under the configured threshold in `src/engine/probability.ts`. Larger or unbounded expressions use a 20,000-trial estimate, labeled as such. The chart marks the latest selected roll outcome. Numeric results use a probability mass chart and show range and mean; symbolic results show categories. The chart displays at most 80 bars at once.
 
-Roll randomness uses `crypto.getRandomValues` with rejection sampling to avoid modulo bias. The engine accepts an injected RNG for deterministic tests. Explosions and rerolls have a defensive 100-step limit per die to prevent pathological infinite loops.
+Roll randomness uses `crypto.getRandomValues` with rejection sampling to avoid modulo bias. The engine accepts an injected RNG for deterministic tests. Unlimited explosions and rerolls have a defensive 100-step limit per die to prevent pathological infinite loops.
 
 ## Multiplayer and privacy
 
@@ -75,6 +83,6 @@ Broadcast a `RollRequest` on the request channel. A GM with No Dice open evaluat
 
 ## Architecture
 
-`src/engine/tokenizer.ts` creates tokens with source spans. `parser.ts` turns tokens into the semantic AST in `ast.ts` and retains the original source in `parseDocument`. A dice node stores its quantity, standard or custom die, and `inferred`/`pool`/`sum` mode. `semantics.ts` resolves inferred modes by context in a separate pass without changing that AST. `validate.ts` reports structured static diagnostics before rolling. `evaluate.ts` performs random evaluation and builds trace steps. `probability.ts` computes exact PMFs independently of the random evaluator and falls back to sampling for large or unbounded cases. `format.ts` independently serializes short, readable long, and expanded long notation from the AST. `probability.worker.ts` keeps distribution work off the UI thread. `protocol.ts`, `gmCrypto.ts`, and `persistence.ts` keep room transport and local history separate from dice semantics. `App.tsx` renders the chart, ledger, notation, and input.
+`src/engine/tokenizer.ts` creates tokens with source spans. `parser.ts` turns tokens into the semantic AST in `ast.ts` and retains the original source in `parseDocument`. A dice node stores its quantity, standard or custom die, and `inferred`/`pool`/`sum` mode. Custom facets are AST values, expressions, or text templates with embedded expression segments. `semantics.ts` resolves inferred modes by context in a separate pass without changing that AST, including nested facet expressions. `validate.ts` reports structured static diagnostics before rolling. `evaluate.ts` chooses a facet before evaluating its expression and builds trace steps. `probability.ts` computes exact PMFs by mixing facet distributions independently of the random evaluator and falls back to sampling for large or unbounded cases. `format.ts` independently serializes short, readable long, and expanded long notation from the AST. `probability.worker.ts` keeps distribution work off the UI thread. `protocol.ts`, `gmCrypto.ts`, and `persistence.ts` keep room transport and local history separate from dice semantics. `App.tsx` renders the chart, ledger, notation, and input.
 
 Dynamic forms such as `H(d4)[5d6]` and `(d4)d(d{4,6,8})` are supported; each structural parameter is rolled once. Pool selectors share one AST abstraction for future operations. Future work includes exact algorithms for larger keep/drop distributions, persistent event reception when the popover is closed, richer Roll20 compatibility, and a background receiver for integrations.

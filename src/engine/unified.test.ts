@@ -18,13 +18,13 @@ function semantic(node:Node):unknown{
     case 'selector':return ['selector',node.operator,semantic(node.count),semantic(node.source)];
     case 'dice':{
       let die:unknown;
-      if(node.die.kind==='standard-die')die=['standard',semantic(node.die.sides)];
+      if(node.die.kind==='standard-die')die=['standard',semantic(node.die.sides),node.die.explodeHighest??null];
       else{
-        const sorted=[...node.die.facets].sort((a,b)=>Number(a)-Number(b));
-        const conventional=sorted.every((value,index)=>typeof value==='number'&&value===index+1);
-        die=conventional?['standard',['literal',sorted.length]]:['custom',node.die.facets];
+        const sorted=node.die.facets.filter(f=>f.kind==='value'&&typeof f.value==='number').map(f=>(f as Extract<typeof f,{kind:'value'}>).value as number).sort((a,b)=>a-b);
+        const conventional=sorted.length===node.die.facets.length&&sorted.every((value,index)=>value===index+1)&&node.die.facets.every(f=>!f.explosion||(f.kind==='value'&&f.value===sorted.length));
+        die=conventional?['standard',['literal',sorted.length],node.die.facets.find(f=>f.kind==='value'&&f.value===sorted.length)?.explosion??null]:['custom',node.die.facets.map(f=>f.kind==='value'?['value',f.value,f.explosion??null]:f.kind==='expression'?['expression',semantic(f.expression),f.explosion??null]:['template',f.segments.map(s=>s.kind==='text'?['text',s.text]:['expression',semantic(s.expression)]),f.explosion??null])];
       }
-      return ['dice',semantic(node.quantity),die,node.resolution,node.explode,node.reroll??null];
+      return ['dice',semantic(node.quantity),die,node.resolution,node.reroll??null];
     }
   }
 }

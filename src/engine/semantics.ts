@@ -13,7 +13,13 @@ export function resolveSemantics(root:Node):SemanticPlan{
       case 'binary':walk(node.left,'scalar');walk(node.right,'scalar');break;
       case 'dice':
         modes.set(node,node.resolution==='inferred'?(context==='pool-source'?'pool':'sum'):node.resolution);
-        walk(node.quantity,'scalar');if(node.die.kind==='standard-die')walk(node.die.sides,'scalar');break;
+        walk(node.quantity,'scalar');
+        if(node.die.kind==='standard-die')walk(node.die.sides,'scalar');
+        else for(const facet of node.die.facets){
+          if(facet.kind==='expression')walk(facet.expression,'scalar');
+          if(facet.kind==='template')for(const segment of facet.segments)if(segment.kind==='expression')walk(segment.expression,'scalar');
+        }
+        break;
       case 'pool':node.items.forEach(item=>walk(item,'pool-source'));break;
       case 'resolve':walk(node.value,'pool-source');break;
       case 'selector':walk(node.count,'scalar');walk(node.source,'pool-source');break;

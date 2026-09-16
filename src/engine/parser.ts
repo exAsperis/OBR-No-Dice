@@ -1,4 +1,4 @@
-import { ExpressionError, type Comparator, type Diagnostic, type Dialect, type Facet, type Node, type ResolutionMode, type Selector, type Span } from './ast';
+import { ExpressionError, type Comparator, type Diagnostic, type Dialect, type Explosion, type FacetSpec, type Node, type ResolutionMode, type Selector, type Span } from './ast';
 import { tokenize, type Token } from './tokenizer';
 import { validate } from './validate';
 
@@ -8,7 +8,7 @@ const word=(token:Token,value:string)=>token.kind==='word'&&token.text.toLowerCa
 
 class Parser {
   private index=0;
-  constructor(private tokens:Token[],private dialect:Dialect){}
+  constructor(private tokens:Token[],private dialect:Dialect,private source:string){}
   private at(offset=0){return this.tokens[Math.min(this.index+offset,this.tokens.length-1)];}
   private next(){return this.tokens[this.index++];}
   private is(value:string){return this.at().text.toLowerCase()===value.toLowerCase();}
@@ -55,7 +55,7 @@ class Parser {
   private dice(quantity:Node,resolution:ResolutionMode,start?:Span):Node{
     const marker=this.next();let die:Extract<Node,{kind:'dice'}>['die'];let end:Span;
     if(this.take('{')){
-      const facets:Facet[]=[];
+      const facets:FacetSpec[]=[];
       if(this.is('}'))this.error('A die must have at least one facet','EMPTY_DIE');
       do{facets.push(this.facet());}while(this.take(','));
       end=this.expect('}');die={kind:'custom-die',facets};
@@ -65,7 +65,7 @@ class Parser {
       const sides=this.number();die={kind:'standard-die',sides};end=sides.span;
     }else this.error(`Expected die facets or size after '${marker.text}'`);
     if(marker.text.toLowerCase()==='die'&&die.kind==='standard-die')this.error("Long 'die' requires a facet list");
-    let result:Node={kind:'dice',quantity,die,resolution,explode:false,span:span(start??(quantity.span.start===marker.start?marker:quantity),end)};
+    let result:Node={kind:'dice',quantity,die,resolution,span:span(start??(quantity.span.start===marker.start?marker:quantity),end)};
     {
       while(true){
         const mod=this.at().text.toLowerCase();
@@ -79,26 +79,71 @@ class Parser {
           if(['<','<=','=','>','>='].includes(this.at().text))comparator=this.next().text as Comparator;
           const sign=this.take('-');const target=this.number();result.reroll={once:mod==='ro',comparator,target:(sign?-1:1)*target.value};result.span.end=target.span.end;void r;continue;
         }
-        if(this.take('!')){if(result.kind!=='dice')this.error('Explosion must precede keep/drop modifiers');result.explode=true;result.span.end=this.tokens[this.index-1].end;continue;}
+        const explosion=this.explosion();
+        if(explosion){
+          if(result.kind!=='dice')this.error('Explosion must precede keep/drop modifiers');
+          if(result.die.kind==='standard-die'){
+            if(result.die.explodeHighest)this.error('Duplicate explosion marker');
+            const sides=result.die.sides;
+            if(sides.kind==='literal'&&Number.isInteger(sides.value)&&sides.value>=1&&sides.value<=1000){
+              result.die={kind:'custom-die',facets:Array.from({length:sides.value},(_,index)=>({kind:'value' as const,value:index+1,span:result.span,explosion:index+1===sides.value?explosion:undefined}))};
+            }else result.die.explodeHighest=explosion;
+          }else{
+            const numeric=result.die.facets.map(face=>face.kind==='value'&&typeof face.value==='number'?face.value:undefined);
+            if(numeric.some(value=>value===undefined))this.error('Trailing explosion requires fixed numeric facets; mark individual facets instead');
+            const highest=Math.max(...numeric as number[]);
+            for(const face of result.die.facets)if(face.kind==='value'&&face.value===highest){if(face.explosion)this.error('Duplicate explosion marker');face.explosion=explosion;}
+          }
+          result.span.end=this.tokens[this.index-1].end;continue;
+        }
         break;
       }
     }
     return result;
   }
-  private facet():Facet{
-    const sign=this.take('-')?-1:1;const t=this.at();
-    if(t.kind==='number'){
-      this.next();let value=Number(t.text)*sign;
-      if(this.take('/')){const denominator=this.number();if(denominator.value===0)this.error('Facet denominator cannot be zero','ZERO_DENOMINATOR');value/=denominator.value;}
-      return value;
+  private facet():FacetSpec{
+    const first=this.at();
+    if(first.kind==='eof'||this.is(',')||this.is('}'))this.error('Expected a die facet');
+    const segments:Array<{kind:'text';text:string}|{kind:'expression';expression:Node}>=[];
+    let cursor=first.start,last:Span=first;
+    while(!this.is(',')&&!this.is('}')&&this.at().kind!=='eof'){
+      const current=this.at();
+      if(current.text==='!'){
+        const next=this.at(1),afterLimit=this.at(2);
+        const atFacetEnd=next.text===','||next.text==='}'||(next.kind==='number'&&(afterLimit.text===','||afterLimit.text==='}'));
+        const hasText=segments.some(part=>part.kind==='text'&&part.text.trim().length>0)||this.source.slice(cursor,current.start).trim().length>0;
+        if(atFacetEnd&&!hasText&&segments.length===1&&segments[0].kind==='expression')break;
+        last=this.next();
+        if(hasText&&next.kind==='number'&&(afterLimit.text===','||afterLimit.text==='}'))last=this.next();
+        continue;
+      }
+      const keyword=current.text.toLowerCase(),next=this.at(1);
+      const dieStart=(keyword==='d'&&(next.kind==='number'||next.text==='{'||next.text==='('))||(keyword==='die'&&next.text==='{');
+      const resolutionStart=['p','pool','s','sum'].includes(keyword)&&(next.kind==='number'||next.text==='('||next.text.toLowerCase()==='d'||next.text.toLowerCase()==='die');
+      const selectorStart=['h','l','dh','dl','highest','lowest'].includes(keyword)&&(next.kind==='number'||next.text==='('||next.text==='['||next.text.toLowerCase()==='of'||next.text.toLowerCase()==='from');
+      const dropStart=keyword==='drop'&&['highest','lowest'].includes(next.text.toLowerCase());
+      const expressionStart=current.kind==='number'||current.text==='('||((current.text==='-'||current.text==='+')&&(next.kind==='number'||next.text==='('||next.text.toLowerCase()==='d'))||dieStart||resolutionStart||selectorStart||dropStart;
+      if(expressionStart){
+        if(current.start>cursor)segments.push({kind:'text',text:this.source.slice(cursor,current.start)});
+        const expression=this.additive();segments.push({kind:'expression',expression});cursor=expression.span.end;last=expression.span;
+      }else{
+        if(current.kind!=='word')this.error('Invalid facet text');
+        last=this.next();
+      }
     }
-    if(sign===-1)this.error('A symbolic facet cannot be negative');
-    if(t.kind==='word'){
-      this.next();let symbol=t.text;let end=t.end;
-      while((this.at().kind==='word'||this.at().kind==='number')&&this.at().start===end){const part=this.next();symbol+=part.text;end=part.end;}
-      return symbol;
-    }
-    this.error('Expected a die facet');
+    if(last.end>cursor)segments.push({kind:'text',text:this.source.slice(cursor,last.end)});
+    if(segments[0]?.kind==='text')segments[0].text=segments[0].text.trimStart();
+    if(segments.at(-1)?.kind==='text')(segments.at(-1) as {kind:'text';text:string}).text=(segments.at(-1) as {kind:'text';text:string}).text.trimEnd();
+    const meaningful=segments.filter(part=>part.kind==='expression'||part.text.length>0);
+    const explosion=this.explosion();
+    if(explosion&&!this.is(',')&&!this.is('}'))this.error('Explosion marker must end a facet');
+    const facetSpan=span(first,explosion?this.tokens[this.index-1]:last);
+    if(meaningful.length===1){const only=meaningful[0];if(only.kind==='text')return {kind:'value',value:only.text,span:facetSpan,explosion};if(only.expression.kind==='literal')return {kind:'value',value:only.expression.value,span:facetSpan,explosion};return {kind:'expression',expression:only.expression,span:facetSpan,explosion};}
+    return {kind:'template',segments:meaningful,span:facetSpan,explosion};
+  }
+  private explosion():Explosion|undefined{
+    if(!this.take('!'))return undefined;
+    return this.at().kind==='number'?{limit:this.number().value}:{};
   }
   private selectorName():Selector|undefined{
     const t=this.at().text.toLowerCase();
@@ -124,7 +169,7 @@ class Parser {
 export interface ParsedDocument { source:string; tokens:Token[]; ast:Node; diagnostics:Diagnostic[] }
 export function parseSyntax(source:string,dialect:Dialect='nodice'):ParsedDocument{
   if(!source.trim())throw new ExpressionError('Enter an expression',true,{severity:'error',code:'EMPTY',message:'Enter an expression',start:0,end:0});
-  const tokens=tokenize(source);return {source,tokens,ast:new Parser(tokens,dialect).parse(),diagnostics:[]};
+  const tokens=tokenize(source);return {source,tokens,ast:new Parser(tokens,dialect,source).parse(),diagnostics:[]};
 }
 export function parseDocument(source:string,dialect:Dialect='nodice'):ParsedDocument{const document=parseSyntax(source,dialect);document.diagnostics=validate(document.ast);return document;}
 export function parse(source:string,dialect:Dialect='nodice'):Node{const document=parseDocument(source,dialect);const error=document.diagnostics[0];if(error)throw new ExpressionError(`${error.message} at position ${error.start+1}`,false,error);return document.ast;}

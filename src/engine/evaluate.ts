@@ -1,5 +1,5 @@
-import { ExpressionError, type Facet, type Node } from './ast';
-import { formatShort } from './format';
+import { ExpressionError, type Explosion, type Facet, type Node } from './ast';
+import { formatFacetShort, formatShort } from './format';
 import { resolveSemantics, type SemanticPlan } from './semantics';
 
 export interface Rng { integer(maxExclusive:number):number }
@@ -18,7 +18,7 @@ const number=(value:Value):number=>{if(typeof value!=='number'||!Number.isFinite
 const members=(value:Value):Facet[]=>Array.isArray(value)?value:[value];
 const positiveInteger=(value:Value,name:string,maximum:number)=>{const n=number(value);if(!Number.isInteger(n)||n<1||n>maximum)throw new ExpressionError(`${name} must resolve to an integer from 1 to ${maximum}`);return n;};
 function rankMap(node:Node):Map<string,number>{
-  if(node.kind==='dice'&&node.die.kind==='custom-die'){const ranks=new Map<string,number>();for(const value of node.die.facets)if(typeof value==='string'&&!ranks.has(value))ranks.set(value,ranks.size);return ranks;}
+  if(node.kind==='dice'&&node.die.kind==='custom-die'){const ranks=new Map<string,number>();for(const facet of node.die.facets)if(facet.kind==='value'&&typeof facet.value==='string'&&!ranks.has(facet.value))ranks.set(facet.value,ranks.size);return ranks;}
   if(node.kind==='pool'){const map=new Map<string,number>();for(const child of node.items)for(const [value,rank] of rankMap(child))map.set(value,rank);return map;}
   if(node.kind==='group'||node.kind==='unary'||node.kind==='resolve')return rankMap(node.value);
   if(node.kind==='selector')return rankMap(node.source);
@@ -38,19 +38,45 @@ function evaluateNode(node:Node,rng:Rng,context:Context,plan:SemanticPlan):Evalu
     case 'dice':{
       const quantity=evaluateNode(node.quantity,rng,'scalar',plan);const count=positiveInteger(quantity.value,'Dice quantity',100);
       const sides=node.die.kind==='standard-die'?evaluateNode(node.die.sides,rng,'scalar',plan):undefined;
-      const faces=node.die.kind==='custom-die'?node.die.facets:Array.from({length:positiveInteger(sides!.value,'Die size',1000)},(_,i)=>i+1);
-      if(!faces.length)throw new ExpressionError('A die must have at least one facet');
+      const faceCount=node.die.kind==='custom-die'?node.die.facets.length:positiveInteger(sides!.value,'Die size',1000);
+      if(!faceCount)throw new ExpressionError('A die must have at least one facet');
       const results:Facet[]=[];const trace=[...quantity.trace,...(sides?.trace??[])];
-      const maximum=faces.every(v=>typeof v==='number')?Math.max(...faces as number[]):undefined;
+      const draw=():{value:Facet;explosion?:Explosion}=>{
+        const index=rng.integer(faceCount);
+        if(node.die.kind==='standard-die')return {value:index+1,explosion:index+1===faceCount?node.die.explodeHighest:undefined};
+        const facet=node.die.facets[index];
+        if(facet.kind==='value')return {value:facet.value,explosion:facet.explosion};
+        trace.push(`facet ${index+1}/${faceCount} → ${formatFacetShort(facet)}`);
+        if(facet.kind==='expression'){
+          const result=evaluateNode(facet.expression,rng,'scalar',plan);trace.push(...result.trace);
+          if(Array.isArray(result.value))throw new ExpressionError('A facet expression must resolve to one value');
+          trace.push(`facet result → ${result.value}`);return {value:result.value,explosion:facet.explosion};
+        }
+        const rendered=facet.segments.map(segment=>{
+          if(segment.kind==='text')return segment.text;
+          const result=evaluateNode(segment.expression,rng,'scalar',plan);trace.push(...result.trace);
+          if(Array.isArray(result.value))throw new ExpressionError('A text facet expression must resolve to one value');
+          return String(result.value);
+        }).join('').trim();
+        trace.push(`facet result → ${rendered}`);return {value:rendered,explosion:facet.explosion};
+      };
       for(let i=0;i<count;i++){
-        let face=faces[rng.integer(faces.length)];trace.push(`die ${i+1} → ${face}`);
+        let drawn=draw(),face=drawn.value;trace.push(`die ${i+1} → ${face}`);
         if(node.reroll){
           const {once,comparator,target}=node.reroll;
           const matches=(v:Facet)=>{const x=number(v);return comparator==='='?x===target:comparator==='<'?x<target:comparator==='<='?x<=target:comparator==='>'?x>target:x>=target;};
-          let tries=0;while(matches(face)){if(++tries>100)throw new ExpressionError('Reroll limit reached');face=faces[rng.integer(faces.length)];trace.push(`reroll → ${face}`);if(once)break;}
+          let tries=0;while(matches(face)){if(++tries>100)throw new ExpressionError('Reroll limit reached');drawn=draw();face=drawn.value;trace.push(`reroll → ${face}`);if(once)break;}
         }
         let value:Facet=face;
-        if(node.explode){if(maximum===undefined)throw new ExpressionError('Explosions require numeric facets');let tries=0;while(face===maximum){if(++tries>100)throw new ExpressionError('Explosion limit reached');face=faces[rng.integer(faces.length)];trace.push(`explode → ${face}`);value=number(value)+number(face);}trace.push(`die ${i+1} total → ${value}`);}
+        if(drawn.explosion){
+          const limit=drawn.explosion.limit??100,unbounded=drawn.explosion.limit===undefined;
+          let extra=0;
+          while(drawn.explosion&&extra<limit){
+            extra++;drawn=draw();face=drawn.value;trace.push(`explode → ${face}`);value=number(value)+number(face);
+          }
+          if(unbounded&&extra===100&&drawn.explosion)throw new ExpressionError('Explosion safety limit reached');
+          trace.push(`die ${i+1} total → ${value}`);
+        }
         results.push(value);
       }
       trace.unshift(`${formatShort(node)} → ${show(results)}`);
