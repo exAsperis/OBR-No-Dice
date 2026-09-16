@@ -5,6 +5,8 @@ const packageJson = await readJson("package.json");
 const manifest = await readJson("public/manifest.json");
 const localManifest = await readJson("public/manifest-local.json");
 const expected = packageJson.version;
+const semver = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$/;
+if (!semver.test(expected)) throw new Error(`package.json version is not valid SemVer 2.0.0: ${expected}`);
 const versionedPath = `public/manifest-v${expected}.json`;
 
 await access(versionedPath);

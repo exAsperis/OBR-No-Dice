@@ -20,7 +20,11 @@ Preserve these invariants:
 - Do not expose secrets in browser code or log user/room metadata.
 - Build all metadata keys as `${EXTENSION_ID}/...` so every namespace remains under `com.ex-asperis.{extension-name}`.
 - Keep Vite's relative build base, but use absolute hosted URLs in Owlbear manifests. Do not use `./` for manifest popover or icon URLs.
-- On every release, synchronize `package.json`, the stable and local manifests, the versioned manifest filename, `src/version.ts`, and every public manifest `?v=` query. Run `pnpm run check:versions`.
+- Follow [Semantic Versioning 2.0.0](https://semver.org/spec/v2.0.0.html) for the extension's public behavior: its install manifest, expression language, roll results, and documented broadcast API. Keep `MAJOR.MINOR.PATCH` versions, without leading zeroes.
+- While the project is in `0.y.z`, increment MINOR for new features or incompatible behavior and PATCH for compatible fixes. After `1.0.0`, increment MAJOR for incompatible public changes, MINOR for compatible features, and PATCH for compatible fixes. Reset lower components when incrementing a higher component. Do not silently reuse a released version for changed runtime behavior.
+- Choose the version before delivering a change. Bump once for the complete set of changes since the last release; documentation-only edits may share the current version when they do not change runtime behavior. Explain any compatibility impact in the README and update protocol message versions separately if their wire format becomes incompatible.
+- On every version bump, synchronize `package.json`, the stable and local manifests, `src/version.ts`, every hosted manifest `?v=` query, and the README's versioned manifest reference. Create `public/manifest-vVERSION.json` as an exact copy of the current stable manifest. Keep older versioned manifest files unchanged; never overwrite a published versioned manifest.
+- Run `pnpm run check:versions` after every version bump. It must verify SemVer syntax and all synchronized version fields before a production build.
 - Publish both `manifest.json` and `manifest-vVERSION.json`. If Owlbear retains a stale stable manifest, remove and re-add the extension using the versioned manifest URL; its versioned popover and icon queries invalidate cached resources.
 - Run `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before delivery.
 - Keep the README, manifest URLs, GitHub Pages workflow, and package identity synchronized.
