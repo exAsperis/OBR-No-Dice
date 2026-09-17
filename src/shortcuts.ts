@@ -45,3 +45,11 @@ export function insertDiceShortcut(source: string, term: string): string {
     return `${trimmed} + ${term}`;
   }
 }
+
+/** A click may be relayed more than once when multiple background frames are active. */
+export function applyDiceShortcutOnce(source: string, term: string, requestId: string, seen: Set<string>): string | null {
+  if (seen.has(requestId)) return null;
+  seen.add(requestId);
+  if (seen.size > 200) seen.delete(seen.values().next().value!);
+  return insertDiceShortcut(source, term);
+}

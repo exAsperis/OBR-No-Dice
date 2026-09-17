@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { fittedPosition, loadCollapsed, loadDraft, loadHeight, loadPosition, saveCollapsed, saveDraft, saveHeight, savePosition } from './panelLayout';
+import { clearDraft, fittedPosition, loadCollapsed, loadDraft, loadHeight, loadPosition, saveCollapsed, saveDraft, saveHeight, savePosition } from './panelLayout';
 
 describe('main panel position', () => {
   beforeEach(() => localStorage.clear());
@@ -32,6 +32,9 @@ describe('main panel position', () => {
     expect(loadDraft('room-a', 'one')).toBe('2d6');
     expect(loadDraft('room-b', 'one')).toBe('d20');
     expect(loadDraft('room-a', 'two')).toBeNull();
+    clearDraft('room-a', 'one');
+    expect(loadDraft('room-a', 'one')).toBeNull();
+    expect(loadDraft('room-b', 'one')).toBe('d20');
   });
 
   it('remembers the measured panel height for the same player', () => {

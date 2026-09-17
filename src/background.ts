@@ -7,8 +7,9 @@ import { createNoDiceApiHandler } from './noDiceApiHandler';
 import { rollExpression } from './rollService';
 import { appendHistory } from './persistence';
 import { PANEL_CHANNEL, PANEL_POPOVER_ID, isPanelMessage, type PanelMessage } from './panelProtocol';
-import { fittedPosition, loadHeight, loadPosition, saveHeight, savePosition, type PanelPosition } from './panelLayout';
+import { clearDraft, fittedPosition, loadHeight, loadPosition, saveHeight, savePosition, type PanelPosition } from './panelLayout';
 import { RELEASE_VERSION } from './version';
+import { fittedRevealPosition, loadRevealPosition, saveRevealPosition } from './revealLayout';
 
 OBR.onReady(async () => {
   const roomId = OBR.room.id;
@@ -21,14 +22,19 @@ OBR.onReady(async () => {
   let opening = false;
   let gmKey: CryptoKey | null = null;
   let rerolling = false;
+  let revealPosition: PanelPosition | null = loadRevealPosition(playerId);
+  let revealResume: { visibleCount: number; highlighted: boolean; dismissDeadline?: number } | null = null;
   const panelChannel = new BroadcastChannel(PANEL_CHANNEL);
   let panelOpen = false;
   let panelOpening = false;
+  let closeAfterOpening = false;
+  let panelClosePromise: Promise<void> | null = null;
   let panelPosition: PanelPosition | null = null;
-  const pendingShortcuts: string[] = [];
+  const pendingShortcuts: Array<{ term: string; requestId: string }> = [];
   const panelSize = { width: 440, height: 650 };
   let desiredPanelHeight = loadHeight(playerId);
   let openedPanelHeight = 0;
+  const sendPanelState = (open: boolean) => panelChannel.postMessage({ type: 'state', roomId, playerId, open } satisfies PanelMessage);
   const panelBounds = async () => {
     const [width, height] = await Promise.all([
       OBR.viewport.getWidth().catch(() => window.screen.availWidth),
@@ -40,6 +46,8 @@ OBR.onReady(async () => {
     if (panelOpening || (panelOpen && !force)) return;
     panelOpening = true;
     try {
+      if (panelClosePromise) await panelClosePromise;
+      if (!force) clearDraft(roomId, playerId);
       const bounds = await panelBounds();
       const size = { width: Math.min(panelSize.width, Math.max(280, bounds.width - 16)), height: Math.min(desiredPanelHeight, panelSize.height, Math.max(180, bounds.height - 16)) };
       const saved = panelPosition ?? loadPosition(playerId);
@@ -49,17 +57,34 @@ OBR.onReady(async () => {
       if (force && panelOpen) await OBR.popover.close(PANEL_POPOVER_ID);
       await OBR.popover.open({
         id: PANEL_POPOVER_ID,
-        url: new URL(`./panel.html?v=${RELEASE_VERSION}`, window.location.href).toString(),
+        url: new URL(`./panel.html?v=${RELEASE_VERSION}${force ? '&resume=1' : ''}`, window.location.href).toString(),
         width: size.width, height: size.height,
         anchorReference: 'POSITION', anchorPosition: position,
         anchorOrigin: { horizontal: 'LEFT', vertical: 'TOP' },
         transformOrigin: { horizontal: 'LEFT', vertical: 'TOP' },
+        hidePaper: true,
         disableClickAway: true, marginThreshold: 8,
       });
       panelOpen = true;
       openedPanelHeight = size.height;
     } catch (error) { panelOpen = false; console.error('No Dice panel could not open', error); }
-    finally { panelOpening = false; if (panelOpen) void adjustPanelHeight(); }
+    finally {
+      panelOpening = false;
+      if (closeAfterOpening) { closeAfterOpening = false; void closePanel(); }
+      else if (panelOpen) { sendPanelState(true); void adjustPanelHeight(); }
+    }
+  };
+  const closePanel = async () => {
+    if (panelOpening) { closeAfterOpening = true; sendPanelState(false); return; }
+    if (panelClosePromise) return panelClosePromise;
+    panelOpen = false;
+    pendingShortcuts.length = 0;
+    sendPanelState(false);
+    panelClosePromise = OBR.popover.close(PANEL_POPOVER_ID)
+      .catch(error => { console.error('No Dice panel could not close', error); })
+      .then(() => clearDraft(roomId, playerId))
+      .finally(() => { panelClosePromise = null; });
+    return panelClosePromise;
   };
   const adjustPanelHeight = async () => {
     if (!panelOpen || panelOpening) return;
@@ -83,24 +108,25 @@ OBR.onReady(async () => {
     const message = event.data;
     if (message.roomId !== roomId || message.playerId !== playerId) return;
     if (message.type === 'open') { void openPanel(); return; }
+    if (message.type === 'toggle') { if (panelOpen || panelOpening) void closePanel(); else void openPanel(); return; }
+    if (message.type === 'state-request') { sendPanelState(panelOpen && !closeAfterOpening); return; }
     if (message.type === 'shortcut') {
       if (panelOpen && !panelOpening) {
-        panelChannel.postMessage({ type: 'apply-shortcut', roomId, playerId, term: message.term } satisfies PanelMessage);
+        panelChannel.postMessage({ type: 'apply-shortcut', roomId, playerId, term: message.term, requestId: message.requestId } satisfies PanelMessage);
       } else {
-        pendingShortcuts.push(message.term);
+        pendingShortcuts.push({ term: message.term, requestId: message.requestId });
         void openPanel();
       }
       return;
     }
     if (message.type === 'ready') {
       if (pendingShortcuts.length) {
-        for (const term of pendingShortcuts.splice(0)) panelChannel.postMessage({ type: 'apply-shortcut', roomId, playerId, term } satisfies PanelMessage);
+        for (const shortcut of pendingShortcuts.splice(0)) panelChannel.postMessage({ type: 'apply-shortcut', roomId, playerId, ...shortcut } satisfies PanelMessage);
       } else panelChannel.postMessage({ type: 'focus', roomId, playerId } satisfies PanelMessage);
       return;
     }
     if (message.type === 'close') {
-      panelOpen = false;
-      void OBR.popover.close(PANEL_POPOVER_ID);
+      void closePanel();
       return;
     }
     if (message.type === 'move') {
@@ -120,38 +146,59 @@ OBR.onReady(async () => {
   }
 
   const send = (message: LocalMessage) => local.postMessage(message);
-  const open = async () => {
-    if (popoverOpen || opening) return;
+  const revealSize = (bounds: { width: number; height: number }) => ({
+    width: Math.min(390, Math.max(280, bounds.width - 32)),
+    height: Math.min(360, Math.max(220, bounds.height - 32)),
+  });
+  const open = async (force = false) => {
+    if (opening || (popoverOpen && !force)) return;
     opening = true;
     try {
-      const [measuredWidth, measuredHeight] = await Promise.all([
-        OBR.viewport.getWidth().catch(() => window.screen.availWidth),
-        OBR.viewport.getHeight().catch(() => window.screen.availHeight),
-      ]);
-      const width = measuredWidth > 0 ? measuredWidth : window.screen.availWidth;
-      const height = measuredHeight > 0 ? measuredHeight : window.screen.availHeight;
+      const bounds = await panelBounds();
+      const size = revealSize(bounds);
+      revealPosition = fittedRevealPosition(revealPosition, bounds, size);
+      saveRevealPosition(playerId, revealPosition);
+      if (force && popoverOpen) await OBR.popover.close(REVEAL_POPOVER_ID);
       await OBR.popover.open({
         id: REVEAL_POPOVER_ID,
-        url: new URL('./reveal.html', window.location.href).toString(),
-        width: Math.min(390, Math.max(280, width - 32)),
-        height: Math.min(360, Math.max(220, height - 32)),
+        url: new URL(`./reveal.html?v=${RELEASE_VERSION}`, window.location.href).toString(),
+        width: size.width,
+        height: size.height,
         anchorReference: 'POSITION',
-        anchorPosition: { left: width - 16, top: height - 16 },
-        anchorOrigin: { horizontal: 'RIGHT', vertical: 'BOTTOM' },
-        transformOrigin: { horizontal: 'RIGHT', vertical: 'BOTTOM' },
+        anchorPosition: revealPosition,
+        anchorOrigin: { horizontal: 'LEFT', vertical: 'TOP' },
+        transformOrigin: { horizontal: 'LEFT', vertical: 'TOP' },
+        hidePaper: true,
         disableClickAway: true,
         marginThreshold: 8,
       });
       popoverOpen = true;
-    } catch (error) { console.error('No Dice roll reveal could not open', error); }
+    } catch (error) { popoverOpen = false; console.error('No Dice roll reveal could not open', error); }
     finally { opening = false; }
   };
+  const ensureRevealOnScreen = async () => {
+    if (!popoverOpen || opening) return;
+    try {
+      const bounds = await panelBounds();
+      const fitted = fittedRevealPosition(revealPosition, bounds, revealSize(bounds));
+      if (fitted.left !== revealPosition?.left || fitted.top !== revealPosition?.top) {
+        revealPosition = fitted;
+        await open(true);
+      }
+    } catch { /* Retry on the next bounds check. */ }
+  };
+  window.addEventListener('resize', () => { void ensureRevealOnScreen(); });
+  window.setInterval(() => { void ensureRevealOnScreen(); }, 5_000);
   const present = (result: RollResult) => {
     if (seen.has(result.requestId)) return;
     seen.add(result.requestId);
     if (seen.size > 200) seen.delete(seen.values().next().value!);
     current = result;
-    if (popoverOpen) send({ type: 'show', roomId, playerId, result });
+    revealResume = null;
+    if (popoverOpen) {
+      send({ type: 'show', roomId, playerId, result });
+      void ensureRevealOnScreen();
+    }
     else void open();
   };
 
@@ -160,11 +207,21 @@ OBR.onReady(async () => {
     const message = event.data;
     if (message.roomId !== roomId || message.playerId !== playerId) return;
     if (message.type === 'result' && isResult(message.result)) present(message.result);
-    if (message.type === 'ready' && current) send({ type: 'show', roomId, playerId, result: current });
+    if (message.type === 'ready' && current) {
+      send({ type: 'show', roomId, playerId, result: current, resume: revealResume ?? undefined });
+      revealResume = null;
+    }
     if (message.type === 'dismiss') {
       current = null;
       popoverOpen = false;
       void OBR.popover.close(REVEAL_POPOVER_ID);
+    }
+    if (message.type === 'move' && current && Number.isFinite(message.dx) && Number.isFinite(message.dy)) {
+      revealResume = Number.isFinite(message.visibleCount)
+        ? { visibleCount: message.visibleCount, highlighted: message.highlighted === true, dismissDeadline: Number.isFinite(message.dismissDeadline) ? message.dismissDeadline : undefined }
+        : null;
+      revealPosition = { left: (revealPosition?.left ?? 0) + message.dx, top: (revealPosition?.top ?? 0) + message.dy };
+      void open(true);
     }
     if (message.type === 'reroll' && current?.requestId === message.requestId && !rerolling) {
       const original = current;

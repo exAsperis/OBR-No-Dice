@@ -1,5 +1,5 @@
 import OBR from '@owlbear-rodeo/sdk';
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createRoot } from 'react-dom/client';
 import { applyOwlbearTheme } from './theme';
 import { EXTENSION_ID } from './constants';
@@ -75,9 +75,13 @@ function Reveal() {
   const [dismissSeconds, setDismissSeconds] = useState(readSeconds);
   const [rerolling, setRerolling] = useState(false);
   const [rerollError, setRerollError] = useState('');
+  const [dismissTiming, setDismissTiming] = useState<{ requestId: string; deadline: number; remainingMs: number; startScale: number } | null>(null);
   const channel = useRef<BroadcastChannel | null>(null);
   const identity = useRef<{ roomId: string; playerId: string } | null>(null);
   const list = useRef<HTMLDivElement | null>(null);
+  const dragStart = useRef<{ x: number; y: number } | null>(null);
+  const resumeCount = useRef(1);
+  const resumeDeadline = useRef<number | null>(null);
 
   useEffect(() => {
     let cleanupTheme: (() => void) | undefined;
@@ -91,7 +95,13 @@ function Reveal() {
         if (event.data.roomId !== identity.current?.roomId || event.data.playerId !== identity.current.playerId) return;
         if (event.data.type === 'reroll-error') { setRerolling(false); setRerollError(event.data.message); return; }
         if (event.data.type !== 'show' || !isResult(event.data.result)) return;
-        setVisibleCount(1);
+        const total=revealLines(event.data.result).length;
+        const resumed=Math.max(1,Math.min(total,event.data.resume?.visibleCount??1));
+        resumeCount.current=resumed;
+        resumeDeadline.current=Number.isFinite(event.data.resume?.dismissDeadline) ? event.data.resume!.dismissDeadline! : null;
+        setDismissTiming(null);
+        setVisibleCount(resumed);
+        setHighlightedRequestId(event.data.resume?.highlighted?event.data.result.requestId:null);
         setRerolling(false);
         setRerollError('');
         setResult(event.data.result);
@@ -104,7 +114,9 @@ function Reveal() {
   useEffect(() => {
     if (!result) return;
     const total = revealLines(result).length;
-    let shown = 1;
+    let shown = resumeCount.current;
+    resumeCount.current = 1;
+    if (shown >= total) return;
     const timer = window.setInterval(() => {
       shown = nextRevealCount(shown, total);
       setVisibleCount(shown);
@@ -130,13 +142,28 @@ function Reveal() {
     const timer = window.setTimeout(() => setHighlightedRequestId(result.requestId), reducedMotion ? 0 : 820);
     return () => window.clearTimeout(timer);
   }, [result, visibleCount, lines.length]);
-  useEffect(() => { if (list.current) list.current.scrollTop = list.current.scrollHeight; }, [visibleCount, result]);
+  useLayoutEffect(() => {
+    const scroller = list.current;
+    if (!scroller) return;
+    const scrollToBottom = () => { scroller.scrollTop = scroller.scrollHeight; };
+    scrollToBottom();
+    const observer = new ResizeObserver(scrollToBottom);
+    observer.observe(scroller);
+    if (scroller.lastElementChild) observer.observe(scroller.lastElementChild);
+    return () => observer.disconnect();
+  }, [visibleCount, result, distribution]);
   useEffect(() => {
-    if (!autoDismiss || !result || rerolling || visibleCount < lines.length) return;
+    if (!autoDismiss || !result || rerolling || visibleCount < lines.length) { setDismissTiming(null); return; }
     const requestId = result.requestId;
+    const durationMs = dismissSeconds * 1000;
+    const now = Date.now();
+    const deadline = resumeDeadline.current ?? now + durationMs;
+    resumeDeadline.current = null;
+    const remainingMs = Math.max(0, deadline - now);
+    setDismissTiming({ requestId, deadline, remainingMs, startScale: Math.min(1, remainingMs / durationMs) });
     const timer = window.setTimeout(() => {
       if (identity.current && result.requestId === requestId) dismiss();
-    }, dismissSeconds * 1000);
+    }, remainingMs);
     return () => window.clearTimeout(timer);
   }, [autoDismiss, dismissSeconds, result, rerolling, visibleCount, lines.length]);
 
@@ -152,7 +179,8 @@ function Reveal() {
   }
 
   return <main className="reveal-shell" aria-label="Roll result">
-    <header className="reveal-header"><div><strong>NO DICE</strong>{result&&<span>{result.playerName}</span>}</div><button type="button" onClick={dismiss} aria-label="Dismiss roll result">×</button></header>
+    <div key={autoDismiss && dismissTiming ? `${dismissTiming.requestId}:${dismissTiming.deadline}` : `waiting:${result?.requestId}`} className={'dismiss-curtain'+(autoDismiss && dismissTiming?' running':'')} style={autoDismiss && dismissTiming ? { '--drain-duration': `${dismissTiming.remainingMs}ms`, '--drain-start': dismissTiming.startScale } as CSSProperties : undefined} aria-hidden="true"/>
+    <header className="reveal-header" onPointerDown={event=>{if((event.target as HTMLElement).closest('button'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start&&identity.current){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)channel.current?.postMessage({type:'move',...identity.current,dx,dy,visibleCount,highlighted:highlightedRequestId===result?.requestId,dismissDeadline:dismissTiming?.deadline} satisfies LocalMessage);}}} onPointerCancel={()=>{dragStart.current=null;}}><div><strong>NO DICE</strong>{result&&<span>{result.playerName}</span>}</div><button type="button" onClick={dismiss} aria-label="Dismiss roll result">×</button></header>
     <div className="reveal-controls"><button type="button" onClick={reroll} disabled={!result || rerolling}>{rerolling ? 'Rolling…' : 'Reroll'}</button><label><input type="checkbox" checked={autoDismiss} onChange={event => { const enabled = event.target.checked; setAutoDismiss(enabled); localStorage.setItem(DISMISS_ENABLED_KEY, String(enabled)); }} /> Auto-dismiss</label><label htmlFor="dismiss-seconds">Seconds</label><input id="dismiss-seconds" type="number" min="1" max="3600" step="1" value={dismissSeconds} disabled={!autoDismiss} onChange={event => { const seconds = Number(event.target.value); if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600) return; setDismissSeconds(seconds); localStorage.setItem(DISMISS_SECONDS_KEY, String(seconds)); }} /></div>
     {rerollError && <div className="reveal-error" role="alert">{rerollError}</div>}
     {result && distribution && distribution.entries.length > 0 && <RevealDistribution distribution={distribution} result={result} highlighted={highlightedRequestId === result.requestId} />}

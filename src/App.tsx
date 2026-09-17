@@ -11,15 +11,16 @@ import { encryptForGm } from './gmCrypto';
 import { GM_CHANNEL, isRequest, isResult, REQUEST_CHANNEL, RESULT_CHANNEL, type RollRequest, type RollResult, type Visibility } from './protocol';
 import { isLocalMessage, LOCAL_CHANNEL, type LocalMessage } from './revealProtocol';
 import { displayValue, rollExpression } from './rollService';
-import { insertDiceShortcut } from './shortcuts';
+import { applyDiceShortcutOnce } from './shortcuts';
 import { PANEL_CHANNEL, isPanelMessage, type PanelCommand, type PanelMessage } from './panelProtocol';
 import { DEFAULT_COLLAPSED, loadCollapsed, loadDraft, saveCollapsed, saveDraft } from './panelLayout';
+import { RELEASE_VERSION } from './version';
 
 const display=displayValue;
 const MAX_VISIBLE_BARS=200;
 export default function App() {
   const obr=useOwlbear();
-  const [expression,setExpression]=useState('2d6');
+  const [expression,setExpression]=useState('');
   const [dialectHint,setDialectHint]=useState<Dialect|undefined>(undefined);
   const [detectedDialect,setDetectedDialect]=useState<Dialect|undefined>(undefined);
   const [visibility,setVisibility]=useState<Visibility>('everyone');
@@ -38,7 +39,10 @@ export default function App() {
   const [preferencesReady,setPreferencesReady]=useState(false);
   const panelChannel=useRef<BroadcastChannel|null>(null);
   const panelRef=useRef<HTMLElement|null>(null);
+  const historyPreviewRef=useRef<HTMLSpanElement|null>(null);
+  const [historyPreviewCount,setHistoryPreviewCount]=useState(Number.POSITIVE_INFINITY);
   const dragStart=useRef<{x:number;y:number}|null>(null);
+  const seenShortcutIds=useRef(new Set<string>());
   const worker=useRef<Worker|null>(null);
   const fairnessWorker=useRef<Worker|null>(null);
   const fairnessId=useRef(0);
@@ -50,8 +54,10 @@ export default function App() {
   currentInput.current={expression,dialect:detectedDialect};
   useEffect(()=>{
     if(!obr.roomId||!obr.playerId)return;
-    const saved=loadDraft(obr.roomId,obr.playerId);
-    if(saved!==null)setExpression(saved);
+    if(new URLSearchParams(window.location.search).get('resume')==='1'){
+      const saved=loadDraft(obr.roomId,obr.playerId);
+      if(saved!==null)setExpression(saved);
+    }
     setCollapsed(loadCollapsed(obr.playerId));
     setPreferencesReady(true);
   },[obr.roomId,obr.playerId]);
@@ -69,7 +75,7 @@ export default function App() {
     panelChannel.current=channel;
     channel.onmessage=(event:MessageEvent<unknown>)=>{
       if(!isPanelMessage(event.data)||event.data.roomId!==obr.roomId||event.data.playerId!==obr.playerId)return;
-      if(event.data.type==='apply-shortcut')useShortcut(event.data.term);
+      if(event.data.type==='apply-shortcut')useShortcut(event.data.term,event.data.requestId);
       if(event.data.type==='focus')requestAnimationFrame(()=>inputRef.current?.focus());
     };
     channel.postMessage({type:'ready',roomId:obr.roomId,playerId:obr.playerId} satisfies PanelMessage);
@@ -168,8 +174,9 @@ export default function App() {
     finally {setBusy(false);}
   }
   function submit() { void perform({version:1,requestId:crypto.randomUUID(),expression,dialect:dialectHint,visibility},true); }
-  function useShortcut(term:string) {
-    const next=insertDiceShortcut(currentInput.current.expression,term);
+  function useShortcut(term:string,requestId:string) {
+    const next=applyDiceShortcutOnce(currentInput.current.expression,term,requestId,seenShortcutIds.current);
+    if(next===null)return;
     currentInput.current.expression=next;
     setExpression(next);setDialectHint(undefined);setSelected(null);setInputError('');
     requestAnimationFrame(()=>{inputRef.current?.focus();inputRef.current?.setSelectionRange(next.length,next.length);});
@@ -180,6 +187,22 @@ export default function App() {
     setFairness(null);setFairnessError('');setFairnessRunning(true);
     fairnessWorker.current?.postMessage({type:'start',id,expression,dialect:dialectHint});
   }
+  useEffect(()=>{
+    if(!collapsed.history||!historyPreviewRef.current)return;
+    const preview=historyPreviewRef.current;
+    const measure=()=>{
+      let count=0;
+      for(const child of Array.from(preview.children) as HTMLElement[]){
+        if(child.offsetLeft+child.offsetWidth>preview.clientWidth)break;
+        count++;
+      }
+      setHistoryPreviewCount(count);
+    };
+    const observer=new ResizeObserver(measure);
+    observer.observe(preview);
+    requestAnimationFrame(measure);
+    return ()=>observer.disconnect();
+  },[collapsed.history,history]);
   if(obr.status==='connecting')return <StatusPanel title="Connecting to Owlbear Rodeo" message="Waiting for room access…"/>;
   if(obr.status==='error')return <StatusPanel title="No Dice unavailable" message={obr.error??'Could not connect to Owlbear Rodeo'} onRetry={()=>void obr.refresh()}/>;
   const max=Math.max(0,...(chart?.entries.map(x=>x.probability)??[]));
@@ -202,11 +225,10 @@ export default function App() {
   </article>;
   return <main className="no-dice" ref={panelRef}>
     <header className="panel-title" onPointerDown={event=>{if((event.target as HTMLElement).closest('button'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)sendPanel({type:'move',dx,dy});}}} onPointerCancel={()=>{dragStart.current=null;}}>
-      <div className="header-brand"><img className="header-icon" src="./icon.svg" alt="" aria-hidden="true"/><div><div className="eyebrow">NO DICE</div><h1>Roll ledger</h1></div></div>
-      <div className="panel-title-actions"><span className="identity">{obr.playerName??'Player'}</span><button type="button" onClick={()=>sendPanel({type:'close'})} aria-label="Close No Dice panel">×</button></div>
+      <div className="header-brand"><img className="header-icon" src="./icon.svg" alt="" aria-hidden="true"/><h1>No Dice</h1><span className="version">v{RELEASE_VERSION}</span></div>
     </header>
     <section className="probability" aria-label="Probability distribution">
-      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><strong>Distribution</strong><span>{collapsed.distribution?'▸':'▾'} {chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.distribution?'▸':'▾'}</span><strong>Distribution</strong></span><span>{chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
       {!collapsed.distribution&&<>
         {chart&&<><div className="bars" role="img" aria-label="Probability mass chart with roll history and fairness overlay">{chart.entries.slice(0,MAX_VISIBLE_BARS).map((item,i)=>{const key=JSON.stringify(item.value),observed=fairCounts.get(key)??0,historic=historicCounts.get(key)??0,rate=fairness?.total?observed/fairness.total:0;return <div className={'bar-cell '+(selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(item.value)?'actual':'')} key={i} title={display(item.value)+': expected '+(item.probability*100).toFixed(3)+'%; ledger rolls '+historic}><div className="bar-pair"><div className="bar" style={{height:Math.max(3,item.probability/max*100)+'%'}}/>{fairness&&<div className="bar observed" style={{height:observed?Math.max(3,rate/max*100)+'%':'0'}}/>}</div>{historic>0&&<span className="history-mark">{historic}</span>}<small>{display(item.value)}</small></div>;})}</div>
         <div className="stats"><span>{chart.range?'Range '+chart.range[0]+'–'+chart.range[1]:chart.entries.length+' outcomes'}</span>{chart.mean!==undefined&&<span>Mean {chart.mean.toFixed(2)}</span>}{chart.standardDeviation!==undefined&&<span>SD {chart.standardDeviation.toFixed(2)}</span>}<span>Mode {display(chart.mode??'—')}</span>{chartRolls.length>0&&<span>{chartRolls.length} ledger rolls</span>}</div></>}
@@ -216,16 +238,16 @@ export default function App() {
     </section>
     <form className="composer" onSubmit={e=>{e.preventDefault();submit();}}>
       <label htmlFor="expression">Expression</label>
-      <div className="expression-row"><input id="expression" ref={inputRef} autoComplete="off" spellCheck={false} value={expression} onChange={e=>{setExpression(e.target.value);setDialectHint(undefined);setSelected(null);setInputError('');}} placeholder="2d6+4" aria-describedby={inputError||chartError?'input-error':undefined}/><button type="button" className="clear-expression" disabled={!expression} onClick={()=>{setExpression('');setDialectHint(undefined);setSelected(null);setInputError('');inputRef.current?.focus();}} aria-label="Clear expression">Clear</button><select aria-label="Roll audience" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">All</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" className="roll-button" disabled={busy||!expression.trim()}>Roll</button></div>
+      <div className="expression-row"><input id="expression" ref={inputRef} autoComplete="off" spellCheck={false} value={expression} onChange={e=>{currentInput.current.expression=e.target.value;setExpression(e.target.value);setDialectHint(undefined);setSelected(null);setInputError('');}} placeholder="Enter expression" aria-describedby={inputError||chartError?'input-error':undefined}/><button type="button" className="clear-expression" disabled={!expression} onClick={()=>{currentInput.current.expression='';setExpression('');setDialectHint(undefined);setSelected(null);setInputError('');inputRef.current?.focus();}} aria-label="Clear expression">Clear</button><select aria-label="Roll audience" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">All</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" className="roll-button" disabled={busy||!expression.trim()}>Roll</button></div>
       {inputError&&<div id="input-error" className="input-error" role="alert">{inputError}</div>}
       {!inputError&&chartError&&<div id="input-error" className="input-error" role="status">{chartError}</div>}
     </form>
     <section className="recent-section" aria-label="Most recent result">
-      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><strong>Most Recent Result</strong><span>{collapsed.recent?'▸':'▾'}</span></button>
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.recent?'▸':'▾'}</span><strong>Most Recent Result</strong></span>{collapsed.recent&&recent&&<span className="collapsed-output">{recent.error??display(recent.value)}</span>}</button>
       {!collapsed.recent&&(recent?entry(recent):<div className="empty">No rolls yet.</div>)}
     </section>
     <section className="ledger" aria-label="Roll history">
-      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.history} onClick={()=>toggle('history')}><strong>History</strong><span>{collapsed.history?'▸':'▾'} {older.length}</span></button>
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.history} onClick={()=>toggle('history')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.history?'▸':'▾'}</span><strong>History</strong></span>{collapsed.history&&<span className="collapsed-history" ref={historyPreviewRef}>{older.map((item,index)=><span className="collapsed-history-result" key={item.requestId} style={{visibility:index<historyPreviewCount?'visible':'hidden'}} aria-hidden={index>=historyPreviewCount}>{item.error??display(item.value)}</span>)}</span>}</button>
       {!collapsed.history&&(older.length?older.map(entry):<div className="empty">No earlier rolls.</div>)}
     </section>
   </main>;

@@ -26,6 +26,9 @@ export function loadDraft(roomId: string, playerId: string): string | null {
 export function saveDraft(roomId: string, playerId: string, expression: string) {
   try { localStorage.setItem(draftKey(roomId, playerId), expression); } catch { /* Storage may be unavailable. */ }
 }
+export function clearDraft(roomId: string, playerId: string) {
+  try { localStorage.removeItem(draftKey(roomId, playerId)); } catch { /* Storage may be unavailable. */ }
+}
 export function loadHeight(playerId: string): number {
   try {
     const value = Number(localStorage.getItem(heightKey(playerId)));

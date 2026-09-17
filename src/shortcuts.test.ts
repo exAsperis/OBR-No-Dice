@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { DICE_SHORTCUTS, insertDiceShortcut } from './shortcuts';
+import { DICE_SHORTCUTS, applyDiceShortcutOnce, insertDiceShortcut } from './shortcuts';
 import { parseAuto } from './engine/parser';
 
 describe('dice shortcuts',()=>{
@@ -22,5 +22,12 @@ describe('dice shortcuts',()=>{
     expect(insertDiceShortcut('d{0,1}','d{0,1}')).toBe('2d{0,1}');
     expect(insertDiceShortcut('d{0..100}','d{0..100}')).toBe('2d{0..100}');
     expect(insertDiceShortcut('d6!','d6')).toBe('d6! + d6');
+  });
+  it('applies each shortcut click once even if relayed twice',()=>{
+    const seen=new Set<string>();
+    const first=applyDiceShortcutOnce('','d6','click-1',seen);
+    expect(first).toBe('d6');
+    expect(applyDiceShortcutOnce(first!,'d6','click-1',seen)).toBeNull();
+    expect(applyDiceShortcutOnce(first!,'d6','click-2',seen)).toBe('2d6');
   });
 });
