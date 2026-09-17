@@ -1,5 +1,5 @@
 import OBR from '@owlbear-rodeo/sdk';
-import { decryptForGm, publishGmKey } from './gmCrypto';
+import { decryptForGm, encryptForGm, publishGmKey } from './gmCrypto';
 import { GM_CHANNEL, isResult, RESULT_CHANNEL, type EncryptedResult, type RollResult } from './protocol';
 import { isLocalMessage, LOCAL_CHANNEL, REVEAL_POPOVER_ID, type LocalMessage } from './revealProtocol';
 import { MAX_API_BROADCAST_BYTES, NO_DICE_API_REQUEST, NO_DICE_API_RESPONSE } from './noDiceApi';
@@ -17,6 +17,7 @@ OBR.onReady(async () => {
   let popoverOpen = false;
   let opening = false;
   let gmKey: CryptoKey | null = null;
+  let rerolling = false;
 
   if (role === 'GM') {
     try { gmKey = await publishGmKey(); }
@@ -69,6 +70,25 @@ OBR.onReady(async () => {
       current = null;
       popoverOpen = false;
       void OBR.popover.close(REVEAL_POPOVER_ID);
+    }
+    if (message.type === 'reroll' && current?.requestId === message.requestId && !rerolling) {
+      const original = current;
+      rerolling = true;
+      void (async () => {
+        try {
+          const { record } = rollExpression({
+            requestId: crypto.randomUUID(), expression: original.expression, dialect: original.dialect,
+            visibility: original.visibility, playerId, playerName: await OBR.player.getName(),
+            label: original.label,
+          });
+          if (record.visibility === 'everyone') await OBR.broadcast.sendMessage(RESULT_CHANNEL, record);
+          if (record.visibility === 'gm' && role !== 'GM') await OBR.broadcast.sendMessage(GM_CHANNEL, await encryptForGm(record));
+          appendHistory(roomId, playerId, record);
+          present(record);
+        } catch (error) {
+          send({ type: 'reroll-error', roomId, playerId, message: error instanceof Error ? error.message : 'Reroll failed' });
+        } finally { rerolling = false; }
+      })();
     }
   };
 

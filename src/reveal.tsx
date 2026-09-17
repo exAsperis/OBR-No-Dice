@@ -2,11 +2,19 @@ import OBR from '@owlbear-rodeo/sdk';
 import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { createRoot } from 'react-dom/client';
 import { applyOwlbearTheme } from './theme';
+import { EXTENSION_ID } from './constants';
 import { isResult, type RollResult } from './protocol';
 import { isLocalMessage, LOCAL_CHANNEL, REVEAL_POPOVER_ID, type LocalMessage } from './revealProtocol';
 import { nextRevealCount, REVEAL_LINE_INTERVAL_MS, reductionDiff, revealLines } from './revealLines';
 import type { Distribution } from './engine/probability';
 import './reveal.css';
+
+const DISMISS_ENABLED_KEY = `${EXTENSION_ID}/reveal-auto-dismiss`;
+const DISMISS_SECONDS_KEY = `${EXTENSION_ID}/reveal-auto-dismiss-seconds`;
+const readSeconds = () => {
+  const value = Number(localStorage.getItem(DISMISS_SECONDS_KEY));
+  return Number.isInteger(value) && value >= 1 && value <= 3600 ? value : 10;
+};
 
 function RevealDistribution({ distribution, result, highlighted }: { distribution: Distribution; result: RollResult; highlighted: boolean }) {
   const scroller = useRef<HTMLDivElement | null>(null);
@@ -63,6 +71,10 @@ function Reveal() {
   const [visibleCount, setVisibleCount] = useState(1);
   const [chart, setChart] = useState<{ requestId: string; distribution: Distribution } | null>(null);
   const [highlightedRequestId, setHighlightedRequestId] = useState<string | null>(null);
+  const [autoDismiss, setAutoDismiss] = useState(() => localStorage.getItem(DISMISS_ENABLED_KEY) === 'true');
+  const [dismissSeconds, setDismissSeconds] = useState(readSeconds);
+  const [rerolling, setRerolling] = useState(false);
+  const [rerollError, setRerollError] = useState('');
   const channel = useRef<BroadcastChannel | null>(null);
   const identity = useRef<{ roomId: string; playerId: string } | null>(null);
   const list = useRef<HTMLDivElement | null>(null);
@@ -75,9 +87,13 @@ function Reveal() {
       const local = new BroadcastChannel(LOCAL_CHANNEL);
       channel.current = local;
       local.onmessage = (event: MessageEvent<unknown>) => {
-        if (!isLocalMessage(event.data) || event.data.type !== 'show' || !isResult(event.data.result)) return;
+        if (!isLocalMessage(event.data)) return;
         if (event.data.roomId !== identity.current?.roomId || event.data.playerId !== identity.current.playerId) return;
+        if (event.data.type === 'reroll-error') { setRerolling(false); setRerollError(event.data.message); return; }
+        if (event.data.type !== 'show' || !isResult(event.data.result)) return;
         setVisibleCount(1);
+        setRerolling(false);
+        setRerollError('');
         setResult(event.data.result);
       };
       local.postMessage({ type: 'ready', ...identity.current } satisfies LocalMessage);
@@ -115,14 +131,30 @@ function Reveal() {
     return () => window.clearTimeout(timer);
   }, [result, visibleCount, lines.length]);
   useEffect(() => { if (list.current) list.current.scrollTop = list.current.scrollHeight; }, [visibleCount, result]);
+  useEffect(() => {
+    if (!autoDismiss || !result || rerolling || visibleCount < lines.length) return;
+    const requestId = result.requestId;
+    const timer = window.setTimeout(() => {
+      if (identity.current && result.requestId === requestId) dismiss();
+    }, dismissSeconds * 1000);
+    return () => window.clearTimeout(timer);
+  }, [autoDismiss, dismissSeconds, result, rerolling, visibleCount, lines.length]);
 
   function dismiss() {
     if (identity.current) channel.current?.postMessage({ type: 'dismiss', ...identity.current } satisfies LocalMessage);
     void OBR.popover.close(REVEAL_POPOVER_ID);
   }
+  function reroll() {
+    if (!result || !identity.current || rerolling) return;
+    setRerolling(true);
+    setRerollError('');
+    channel.current?.postMessage({ type: 'reroll', ...identity.current, requestId: result.requestId } satisfies LocalMessage);
+  }
 
   return <main className="reveal-shell" aria-label="Roll result">
     <header className="reveal-header"><div><strong>NO DICE</strong>{result&&<span>{result.playerName}</span>}</div><button type="button" onClick={dismiss} aria-label="Dismiss roll result">×</button></header>
+    <div className="reveal-controls"><button type="button" onClick={reroll} disabled={!result || rerolling}>{rerolling ? 'Rolling…' : 'Reroll'}</button><label><input type="checkbox" checked={autoDismiss} onChange={event => { const enabled = event.target.checked; setAutoDismiss(enabled); localStorage.setItem(DISMISS_ENABLED_KEY, String(enabled)); }} /> Auto-dismiss</label><label htmlFor="dismiss-seconds">Seconds</label><input id="dismiss-seconds" type="number" min="1" max="3600" step="1" value={dismissSeconds} disabled={!autoDismiss} onChange={event => { const seconds = Number(event.target.value); if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600) return; setDismissSeconds(seconds); localStorage.setItem(DISMISS_SECONDS_KEY, String(seconds)); }} /></div>
+    {rerollError && <div className="reveal-error" role="alert">{rerollError}</div>}
     {result && distribution && distribution.entries.length > 0 && <RevealDistribution distribution={distribution} result={result} highlighted={highlightedRequestId === result.requestId} />}
     <div className="reveal-lines" ref={list} aria-live="off">
       {visible.map((line, index) => {

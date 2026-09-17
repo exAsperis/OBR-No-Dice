@@ -7,7 +7,9 @@ export type LocalMessage =
   | { type: 'result'; roomId: string; playerId: string; result: RollResult }
   | { type: 'show'; roomId: string; playerId: string; result: RollResult }
   | { type: 'ready'; roomId: string; playerId: string }
-  | { type: 'dismiss'; roomId: string; playerId: string };
+  | { type: 'dismiss'; roomId: string; playerId: string }
+  | { type: 'reroll'; roomId: string; playerId: string; requestId: string }
+  | { type: 'reroll-error'; roomId: string; playerId: string; message: string };
 
 export const isLocalMessage = (value: unknown): value is LocalMessage => {
   if (!value || typeof value !== 'object') return false;
