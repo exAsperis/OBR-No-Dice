@@ -2,6 +2,7 @@ import type { RollResult } from './protocol';
 import { parse } from './engine/parser';
 import { formatShort } from './engine/format';
 import type { Value } from './engine/evaluate';
+import { resultHeading } from './expressionName';
 
 const display = (value: Value) => Array.isArray(value) ? `[${value.join(', ')}]` : String(value);
 const compact = (line: string) => line.length > 100 ? `${line.slice(0, 99)}…` : line;
@@ -21,7 +22,7 @@ export function reductionDiff(previous: string, next: string) {
   };
 }
 
-export const REVEAL_LINE_INTERVAL_MS = 1000;
+export const REVEAL_LINE_INTERVAL_MS = 500;
 export const nextRevealCount = (current: number, total: number) => Math.min(total, current + 1);
 
 export function revealLines(result: RollResult): RevealLine[] {
@@ -31,6 +32,6 @@ export function revealLines(result: RollResult): RevealLine[] {
   return [
     { text: compact(short), final: false },
     ...work.map(text => ({ text, final: false })),
-    { text: result.error ? `ERROR: ${result.error}` : `RESULT: ${display(result.value)}${result.interpretation ? ` · ${result.interpretation}` : ''}`, final: true },
+    { text: result.error ? `ERROR: ${result.error}` : `${resultHeading(result.expression)}: ${display(result.value)}${result.interpretation ? ` · ${result.interpretation}` : ''}`, final: true },
   ];
 }

@@ -22,7 +22,7 @@ export class PresentationRecorder {
   private render(node: Node, parent = 0): string {
     const replacement = this.replacements.get(node);
     if (replacement !== undefined) return replacement;
-    if (node.kind === 'group') return `(${this.render(node.value)})`;
+    if (node.kind === 'group') return this.replacements.has(node.value) ? this.render(node.value) : `(${this.render(node.value)})`;
     let output: string;
     switch (node.kind) {
       case 'literal': output = String(node.value); break;
@@ -33,14 +33,26 @@ export class PresentationRecorder {
         break;
       }
       case 'selector': {
-        const count = this.replacements.get(node.count) ?? (node.count.kind === 'literal' && node.count.value === 1 ? '' : formatShort(node.count));
+        const count = node.count.kind === 'literal' && node.count.value === 1 ? '' : this.render(node.count);
         const source = this.replacements.get(node.source) ?? node.source.items.map(item => this.render(item)).join(',');
         output = `${selectorName[node.operator]}${count}[${source}]`;
         break;
       }
       case 'pool': output = `pool(${node.items.map(item => this.render(item)).join(',')})`; break;
       case 'resolve': output = `${node.resolution === 'pool' ? 'p' : 's'}${this.render(node.value)}`; break;
-      case 'dice': output = formatShort(node); break;
+      case 'dice': {
+        const quantity = node.quantity.kind === 'literal' && node.quantity.value === 1 ? '' : this.render(node.quantity);
+        const prefix = node.resolution === 'inferred' ? '' : node.resolution === 'pool' ? 'p' : 's';
+        const reroll = node.reroll ? `${node.reroll.once ? 'ro' : 'r'}${node.reroll.comparator}${node.reroll.target}` : '';
+        if (node.die.kind === 'standard-die') {
+          const die = `d${this.render(node.die.sides)}${node.die.explodeHighest ? `!${node.die.explodeHighest.limit ?? ''}` : ''}${node.die.rerollLowest ? `r${node.die.rerollLowest.limit ?? ''}` : ''}`;
+          output = `${prefix}${quantity}${die}${reroll}`;
+        } else {
+          const unit = formatShort({ ...node, quantity: { kind: 'literal', value: 1, span: node.quantity.span }, resolution: 'inferred', reroll: undefined });
+          output = `${prefix}${quantity}${unit}${reroll}`;
+        }
+        break;
+      }
       case 'interpret': output = this.render(node.expression); break;
     }
     return precedence(node) < parent ? `(${output})` : output;

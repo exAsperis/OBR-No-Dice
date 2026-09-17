@@ -32,12 +32,12 @@ function rankMap(node:Node):Map<string,number>{
   if(node.kind==='selector')return rankMap(node.source);
   return new Map();
 }
-function evaluateNode(node:Node,rng:Rng,context:Context,plan:SemanticPlan,presentation:PresentationRecorder,showStages:boolean,budget:RollBudget):Evaluation{
+function evaluateNode(node:Node,rng:Rng,context:Context,plan:SemanticPlan,presentation:PresentationRecorder,showStages:boolean,budget:RollBudget,operand=false):Evaluation{
   spend(budget);
   if(++budget.depth>100)throw new ExpressionError('Roll exceeded the nested expression safety limit');
-  try{return evaluateNodeInner(node,rng,context,plan,presentation,showStages,budget);}finally{budget.depth--;}
+  try{return evaluateNodeInner(node,rng,context,plan,presentation,showStages,budget,operand);}finally{budget.depth--;}
 }
-function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,presentation:PresentationRecorder,showStages:boolean,budget:RollBudget):Evaluation{
+function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,presentation:PresentationRecorder,showStages:boolean,budget:RollBudget,operand:boolean):Evaluation{
   switch(node.kind){
     case 'interpret':{
       const result=evaluateNode(node.expression,rng,'scalar',plan,presentation,showStages,budget);
@@ -46,24 +46,31 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       return {...result,interpretation:label};
     }
     case 'literal':return {value:node.value,trace:[],stages:presentation.stages};
-    case 'group':return evaluateNode(node.value,rng,context,plan,presentation,showStages,budget);
-    case 'unary':{const inner=evaluateNode(node.value,rng,'scalar',plan,presentation,showStages,budget);const value=-number(inner.value);presentation.replace(node,String(value));if(showStages&&!presentation.isRoot(node))presentation.show();return {value,trace:[...inner.trace,`−${show(inner.value)} → ${value}`],stages:presentation.stages};}
+    case 'group':return evaluateNode(node.value,rng,context,plan,presentation,showStages,budget,operand);
+    case 'unary':{const inner=evaluateNode(node.value,rng,'scalar',plan,presentation,showStages,budget,operand);const value=-number(inner.value);presentation.replace(node,String(value));if(showStages&&!presentation.isRoot(node))presentation.show();return {value,trace:[...inner.trace,`−${show(inner.value)} → ${value}`],stages:presentation.stages};}
     case 'binary':{
-      const left=evaluateNode(node.left,rng,'scalar',plan,presentation,showStages,budget),right=evaluateNode(node.right,rng,'scalar',plan,presentation,showStages,budget);const a=number(left.value),b=number(right.value);
+      const left=evaluateNode(node.left,rng,'scalar',plan,presentation,showStages,budget,operand),right=evaluateNode(node.right,rng,'scalar',plan,presentation,showStages,budget,operand);const a=number(left.value),b=number(right.value);
       const value=node.op==='+'?a+b:node.op==='-'?a-b:node.op==='*'?a*b:a/b;
       if(!Number.isFinite(value))throw new ExpressionError('Non-finite arithmetic result');
       presentation.replace(node,String(value));if(showStages&&!presentation.isRoot(node))presentation.show();
       return {value,trace:[...left.trace,...right.trace,`${a} ${node.op} ${b} → ${value}`],stages:presentation.stages};
     }
     case 'dice':{
-      const quantity=evaluateNode(node.quantity,rng,'scalar',plan,presentation,false,budget);const count=positiveInteger(quantity.value,'Dice quantity',100);
-      const sides=node.die.kind==='standard-die'?evaluateNode(node.die.sides,rng,'scalar',plan,presentation,false,budget):undefined;
+      // Resolve operands left to right before drawing the outer dice.
+      const quantity=evaluateNode(node.quantity,rng,'scalar',plan,presentation,showStages,budget,true);const count=positiveInteger(quantity.value,'Dice quantity',100);
+      const sides=node.die.kind==='standard-die'?evaluateNode(node.die.sides,rng,'scalar',plan,presentation,showStages,budget,true):undefined;
       const faceCount=node.die.kind==='custom-die'?node.die.facets.length:positiveInteger(sides!.value,'Die size',1000);
       if(!faceCount)throw new ExpressionError('A die must have at least one facet');
       const results:Facet[]=[];const trace=[...quantity.trace,...(sides?.trace??[])];
-      const draw=():{value:Facet;explosion?:Explosion;facetReroll?:Explosion;index:number}=>{
-        spend(budget);
-        const index=rng.integer(faceCount);
+      // Select all initial custom facets before evaluating their expressions.
+      // This makes each facet's nested rolls visible in left-to-right order.
+      const customFacets=node.die.kind==='custom-die'?node.die.facets:undefined;
+      const selected=customFacets?Array.from({length:count},()=>{spend(budget);return rng.integer(faceCount);}):undefined;
+      const selectedLabels=selected?.map(index=>formatFacetShort(customFacets![index]));
+      if(selectedLabels&&showStages){presentation.replace(node,show(selectedLabels));presentation.show();}
+      const draw=(preselected?:number):{value:Facet;explosion?:Explosion;facetReroll?:Explosion;index:number}=>{
+        if(preselected===undefined)spend(budget);
+        const index=preselected??rng.integer(faceCount);
         if(node.die.kind==='standard-die')return {value:index+1,index,explosion:index+1===faceCount?node.die.explodeHighest:undefined,facetReroll:index===0?node.die.rerollLowest:undefined};
         const facet=node.die.facets[index];
         if(facet.kind==='value')return {value:facet.value,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
@@ -82,7 +89,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
         trace.push(`facet result → ${rendered}`);return {value:rendered,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
       };
       for(let i=0;i<count;i++){
-        let drawn=draw(),face=drawn.value;trace.push(`die ${i+1} → ${face}`);
+        let drawn=draw(selected?.[i]),face=drawn.value;trace.push(`die ${i+1} → ${face}`);
         if(node.reroll){
           const {once,comparator,target}=node.reroll;
           const matches=(v:Facet)=>{const x=number(v);return comparator==='='?x===target:comparator==='<'?x<target:comparator==='<='?x<=target:comparator==='>'?x>target:x>=target;};
@@ -109,10 +116,11 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
           trace.push(`die ${i+1} total → ${value}`);
         }
         results.push(value);
+        if(selectedLabels&&showStages){selectedLabels[i]=String(value);presentation.replace(node,show(selectedLabels));presentation.show();}
       }
-      trace.unshift(`${formatShort(node)} → ${show(results)}`);
+      trace.push(`${formatShort(node)} → ${show(results)}`);
       const resolution=plan.modeFor(node);
-      presentation.replace(node,show(results));if(showStages)presentation.show();
+      presentation.replace(node,show(results));if(showStages&&!operand)presentation.show();
       if(resolution==='pool')return {value:results,trace,stages:presentation.stages};
       if(results.every(v=>typeof v==='number')){const value=results.reduce<number>((a,b)=>a+(b as number),0);presentation.replace(node,String(value));if(showStages)presentation.show();return {value,trace:[...trace,`sum → ${value}`],stages:presentation.stages};}
       if(node.resolution==='sum')throw new ExpressionError('Symbolic dice cannot be summed');
@@ -133,7 +141,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       return {value,trace:[...inner.trace,`sum → ${value}`],stages:presentation.stages};
     }
     case 'selector':{
-      const countResult=evaluateNode(node.count,rng,'scalar',plan,presentation,false,budget);const count=positiveInteger(countResult.value,'Selection count',100);
+      const countResult=evaluateNode(node.count,rng,'scalar',plan,presentation,showStages,budget,true);const count=positiveInteger(countResult.value,'Selection count',100);
       const source=evaluateNode(node.source,rng,'pool-source',plan,presentation,false,budget);const values=members(source.value);
       if(count>values.length)throw new ExpressionError(`Cannot select or drop ${count} results from a pool of ${values.length}`);
       const ranks=rankMap(node.source);

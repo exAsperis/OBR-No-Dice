@@ -12,7 +12,22 @@ describe('whole-expression presentation', () => {
   });
   it('shows a dynamic selector, retained pool, and arithmetic', () => {
     const result = roll(parse('H(d4)[4d6]+2'), fixed(2,1,4,5,0));
-    expect(result.stages).toEqual(['H(d4)[4d6]+2', 'H3[2,5,6,1] + 2', '[2, 5, 6] + 2', '13 + 2']);
+    expect(result.stages).toEqual(['H(d4)[4d6]+2', 'H3[4d6] + 2', 'H3[2,5,6,1] + 2', '[2, 5, 6] + 2', '13 + 2']);
     expect(result.value).toBe(15);
+  });
+  it('shows quantity, die size, then the outer roll as separate reductions', () => {
+    const result = roll(parse('(d4)d(d6)'), fixed(1, 4, 1, 4));
+    expect(result.stages).toEqual(['(d4)d(d6)', '2d(d6)', '2d5', '[2, 5]', '7']);
+    expect(result.value).toBe(7);
+    expect(result.trace.findIndex(step => step.includes('d4 →'))).toBeLessThan(result.trace.findIndex(step => step.includes('d6 →')));
+  });
+  it('selects custom facets before resolving their nested rolls', () => {
+    const result = roll(parse('(d2)d{d4,d6,d8,d10,d12,d20}'), fixed(1, 2, 0, 4, 2));
+    expect(result.stages).toEqual(['(d2)d{d4,d6,d8,d10,d12,d20}', '2d{d4,d6,d8,d10,d12,d20}', '[d8, d4]', '[5, d4]', '[5, 3]', '8']);
+    expect(result.value).toBe(8);
+  });
+  it('logs each roll inside an arithmetic dice quantity', () => {
+    const result = roll(parse('(d4+d6)d8'), fixed(1, 2, 0, 1, 2, 3, 4));
+    expect(result.stages.slice(0, 4)).toEqual(['(d4+d6)d8', '(2 + d6)d8', '(2 + 3)d8', '5d8']);
   });
 });

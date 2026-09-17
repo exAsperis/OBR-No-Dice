@@ -8,6 +8,8 @@ import { isLocalMessage, LOCAL_CHANNEL, REVEAL_POPOVER_ID, type LocalMessage } f
 import { nextRevealCount, reductionDiff, revealLines } from './revealLines';
 import { DEFAULT_ROOM_SETTINGS, readRoomSettings } from './roomSettings';
 import type { Distribution } from './engine/probability';
+import { Toggle } from './Toggle';
+import { ResultDisplay } from './ResultDisplay';
 import './reveal.css';
 
 const DISMISS_ENABLED_KEY = `${EXTENSION_ID}/reveal-auto-dismiss`;
@@ -202,7 +204,7 @@ function Reveal() {
   return <main className={`reveal-shell${calculationSpeedMs === 0 ? ' instant' : ''}`} aria-label="Roll result">
     <div key={autoDismiss && dismissTiming ? `${dismissTiming.requestId}:${dismissTiming.deadline}` : `waiting:${result?.requestId}`} className={'dismiss-curtain'+(autoDismiss && dismissTiming?' running':'')} style={autoDismiss && dismissTiming ? { '--drain-duration': `${dismissTiming.remainingMs}ms`, '--drain-start': dismissTiming.startScale } as CSSProperties : undefined} aria-hidden="true"/>
     <header className="reveal-header" onPointerDown={event=>{if((event.target as HTMLElement).closest('button'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start&&identity.current){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)channel.current?.postMessage({type:'move',...identity.current,dx,dy,visibleCount,highlighted:highlightedRequestId===result?.requestId,dismissDeadline:dismissTiming?.deadline} satisfies LocalMessage);}}} onPointerCancel={()=>{dragStart.current=null;}}><div><strong>NO DICE</strong>{result&&<span>{result.playerName}</span>}</div><button type="button" onClick={dismiss} aria-label="Dismiss roll result">×</button></header>
-    <div className="reveal-controls"><button type="button" onClick={reroll} disabled={!result || rerolling}>{rerolling ? 'Rolling…' : 'Reroll'}</button><label><input type="checkbox" checked={autoDismiss} onChange={event => { const enabled = event.target.checked; setAutoDismiss(enabled); localStorage.setItem(DISMISS_ENABLED_KEY, String(enabled)); }} /> Auto-dismiss</label><label htmlFor="dismiss-seconds">Seconds</label><input id="dismiss-seconds" type="number" min="1" max="3600" step="1" value={dismissSeconds} disabled={!autoDismiss} onChange={event => { const seconds = Number(event.target.value); if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600) return; setDismissSeconds(seconds); localStorage.setItem(DISMISS_SECONDS_KEY, String(seconds)); }} /></div>
+    <div className="reveal-controls"><button type="button" onClick={reroll} disabled={!result || rerolling}>{rerolling ? 'Rolling…' : 'Reroll'}</button><Toggle checked={autoDismiss} onChange={enabled => { setAutoDismiss(enabled); localStorage.setItem(DISMISS_ENABLED_KEY, String(enabled)); }}>Auto-dismiss</Toggle><label htmlFor="dismiss-seconds">Seconds</label><input id="dismiss-seconds" type="number" min="1" max="3600" step="1" value={dismissSeconds} disabled={!autoDismiss} onChange={event => { const seconds = Number(event.target.value); if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600) return; setDismissSeconds(seconds); localStorage.setItem(DISMISS_SECONDS_KEY, String(seconds)); }} /></div>
     {rerollError && <div className="reveal-error" role="alert">{rerollError}</div>}
     {result && distribution && distribution.entries.length > 0 && <RevealDistribution distribution={distribution} result={result} highlighted={highlightedRequestId === result.requestId} />}
     <div className="reveal-lines" ref={list} aria-live="off">
@@ -210,7 +212,7 @@ function Reveal() {
         const previous = lines[index - 1]?.text;
         const change = previous === undefined ? null : line.final ? {prefix:'',removed:previous,added:line.text,suffix:''} : reductionDiff(previous, line.text);
         return <div key={`${result?.requestId}-${index}`} className={`reveal-line ${line.final ? 'reveal-final' : ''} ${index ? 'reveal-entering' : ''}`} onAnimationEnd={line.final ? event => { if (event.target === event.currentTarget && event.animationName === 'reveal-drop') setFinishedRequestId(result!.requestId); } : undefined} style={change ? { '--from-width': `${Math.min(change.removed.length, 90)}ch`, '--to-width': `${Math.min(change.added.length, 90)}ch` } as CSSProperties : undefined}>
-          {change ? <span className="reveal-transition" role={line.final ? 'status' : undefined} aria-label={line.final ? line.text : undefined}>
+          {line.final && result ? <ResultDisplay result={result} announce/> : change ? <span className="reveal-transition">
             <span>{change.prefix}</span>
             <span className="reveal-change"><span className="reveal-old-term" aria-hidden="true">{change.removed}</span><span className="reveal-new-term">{change.added}</span></span>
             <span>{change.suffix}</span>

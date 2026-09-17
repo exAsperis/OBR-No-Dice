@@ -7,7 +7,7 @@ export const collapseKey = (playerId: string) => `${EXTENSION_ID}/panel-collapse
 export const draftKey = (roomId: string, playerId: string) => `${EXTENSION_ID}/panel-draft/${roomId}/${playerId}`;
 export const heightKey = (playerId: string) => `${EXTENSION_ID}/panel-height/${playerId}`;
 export interface CollapsedSections { distribution: boolean; recent: boolean; history: boolean }
-export const DEFAULT_COLLAPSED: CollapsedSections = { distribution: false, recent: false, history: false };
+export const DEFAULT_COLLAPSED: CollapsedSections = { distribution: false, recent: false, history: true };
 
 export function loadCollapsed(playerId: string): CollapsedSections {
   try {

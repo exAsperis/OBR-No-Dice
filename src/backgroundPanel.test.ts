@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { PANEL_CHANNEL } from './panelProtocol';
+import { PANEL_CHANNEL, PANEL_POPOVER_ID } from './panelProtocol';
 import { LOCAL_CHANNEL } from './revealProtocol';
 import { loadRevealPosition } from './revealLayout';
 import { loadDraft, saveDraft } from './panelLayout';
@@ -80,6 +80,9 @@ describe('background main panel', () => {
     await vi.waitFor(() => expect(state.opened).toHaveLength(7));
     expect(state.opened[6].url).not.toContain('resume=1');
     expect(panel.sent.at(-1)).toEqual(expect.objectContaining({ type: 'state', open: true }));
+    send({ type: 'close' });
+    await vi.waitFor(() => expect(state.closed).toContain(PANEL_POPOVER_ID));
+    expect(panel.sent.at(-1)).toEqual(expect.objectContaining({ type: 'state', open: false }));
     vi.unstubAllGlobals();
   });
 });

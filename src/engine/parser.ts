@@ -2,6 +2,7 @@ import { ExpressionError, type Comparator, type Diagnostic, type Dialect, type E
 import { tokenize, type Token } from './tokenizer';
 import { validate } from './validate';
 import { parseInterpretationTable } from './interpretation';
+import { splitExpressionName } from '../expressionName';
 
 const span=(a:Span|Node,b:Span|Node):Span=>({start:'span'in a?a.span.start:a.start,end:'span'in b?b.span.end:b.end});
 const lit=(value:number,where:Span):Extract<Node,{kind:'literal'}>=>({kind:'literal',value,span:where});
@@ -222,10 +223,13 @@ function interpretationPipe(source:string):number{
 }
 export function parseSyntax(source:string,dialect:Dialect='nodice'):ParsedDocument{
   if(!source.trim())throw new ExpressionError('Enter an expression',true,{severity:'error',code:'EMPTY',message:'Enter an expression',start:0,end:0});
-  const pipe=interpretationPipe(source),expression=pipe<0?source:source.slice(0,pipe);
+  const named=splitExpressionName(source);
+  if(named.suffix&&!named.name)throw new ExpressionError('Enter a name after #');
+  const sourceWithoutName=named.expression;
+  const pipe=interpretationPipe(sourceWithoutName),expression=pipe<0?sourceWithoutName:sourceWithoutName.slice(0,pipe);
   const tokens=tokenize(expression);
   const inner=new Parser(tokens,dialect,expression).parse();
-  const ast:Node=pipe<0?inner:{kind:'interpret',expression:inner,rules:parseInterpretationTable(source.slice(pipe+1),pipe+1),span:{start:inner.span.start,end:source.length}};
+  const ast:Node=pipe<0?inner:{kind:'interpret',expression:inner,rules:parseInterpretationTable(sourceWithoutName.slice(pipe+1),pipe+1),span:{start:inner.span.start,end:sourceWithoutName.length}};
   return {source,tokens,ast,diagnostics:[]};
 }
 export function parseDocument(source:string,dialect:Dialect='nodice'):ParsedDocument{const document=parseSyntax(source,dialect);document.diagnostics=validate(document.ast);return document;}

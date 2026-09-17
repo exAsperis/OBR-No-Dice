@@ -19,8 +19,9 @@ import { DEFAULT_ROOM_SETTINGS, readRoomSettings, type RoomSettings } from './ro
 import { GMSettings } from './GMSettings';
 import { NotationPopover } from './components/NotationPopover';
 import { VERIFY_LOCAL_CHANNEL, type VerificationLocalMessage } from './verificationBridge';
-import { SeededRng } from './verificationCrypto';
+import { SeededRng, VERIFY_VERSION } from './verificationCrypto';
 import { MAX_ROLL_STEPS } from './engine/evaluate';
+import { ResultDisplay } from './ResultDisplay';
 
 const display=displayValue;
 const MAX_VISIBLE_BARS=200;
@@ -192,7 +193,7 @@ export default function App() {
       };
       const verification=local&&roomSettings.verifiableRollsEnabled&&obr.roomId&&obr.playerId&&verifierChannel.current
         ? await new Promise<RollResult['verification']|undefined>(resolve=>{
-          const timeout=setTimeout(()=>{pendingVerification.current.delete(req.requestId);resolve({state:'failed',reason:'Verification service did not respond',rollId:req.requestId,protocol:'NODICE_VERIFIABLE_ROLL_V1',canonicalExpression:req.expression,rollerConnectionId:'',peerConnectionId:''});},15000);
+          const timeout=setTimeout(()=>{pendingVerification.current.delete(req.requestId);resolve({state:'failed',reason:'Verification service did not respond',rollId:req.requestId,protocol:VERIFY_VERSION,canonicalExpression:req.expression,rollerConnectionId:'',peerConnectionId:''});},15000);
           pendingVerification.current.set(req.requestId,record=>{clearTimeout(timeout);resolve(record);});
           verifierChannel.current!.postMessage({type:'roll',roomId:obr.roomId!,playerId:obr.playerId!,requestId:req.requestId,input} satisfies VerificationLocalMessage);
         }):undefined;
@@ -268,18 +269,18 @@ export default function App() {
   };
   const toggle=(section:'distribution'|'recent'|'history')=>setCollapsed(previous=>({...previous,[section]:!previous[section]}));
   const entry=(item:RollResult)=><article className="entry" key={item.requestId}>
-    <div className="entry-meta"><strong>{item.playerName}</strong><span className="entry-meta-right">{item.verification&&<span className={`verification-badge ${item.verification.state}`}>{item.verification.state==='verified'?'✓ Verified':'⚠ Verification failed'}</span>}<span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
+    <div className="entry-meta"><strong>{item.playerName}</strong><span className="entry-meta-right"><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
     <button type="button" className="expression-link" onClick={()=>{setExpression(item.expression);setDialectHint(item.dialect);setSelected(null);}} title="Put this expression back in the input">{item.expression}</button>
     {item.label&&<div className="entry-label">{item.label}</div>}
-    <div className="result">{item.error?'ERROR':'RESULT'} <strong>{item.error??display(item.value)}</strong>{item.interpretation&&<span className="interpretation">{item.interpretation}</span>}</div>
-    {item.verification&&<details className="verification-details"><summary>Verification details</summary><pre>{JSON.stringify(item.verification,null,2)}</pre></details>}
     <details><summary>Show work</summary><ol>{(item.steps?.length?item.steps:item.trace).map((step,i)=><li key={i}>{step}</li>)}</ol></details>
+    <ResultDisplay result={item}/>
   </article>;
   return <main className="no-dice" ref={panelRef}>
-    <header className="panel-title" onPointerDown={event=>{if((event.target as HTMLElement).closest('button'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)sendPanel({type:'move',dx,dy});}}} onPointerCancel={()=>{dragStart.current=null;}}>
+    <header className="panel-title" onPointerDown={event=>{if((event.target as HTMLElement).closest('button,a'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)sendPanel({type:'move',dx,dy});}}} onPointerCancel={()=>{dragStart.current=null;}}>
       <div className="header-brand"><img className="header-icon" src="./icon.svg" alt="" aria-hidden="true"/><h1>No Dice</h1><span className="version">v{RELEASE_VERSION}</span></div><div className="panel-title-actions"><button type="button" className={`header-action fairness-toggle${fairnessRunning?' running':''}`} onClick={toggleFairness} disabled={!expression.trim()} aria-label={fairnessRunning?'Stop fairness calculation':'Calculate fairness'} aria-pressed={fairnessRunning} title={fairnessRunning?'Stop fairness calculation':'Calculate fairness'}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v17M5 6h14M3 20h18M7 6l-4 8h8L7 6Zm10 0-4 8h8l-4-8Z"/></svg></button>{obr.role==='GM'&&<button type="button" className="settings-toggle header-action" aria-label="GM settings" aria-expanded={settingsOpen} title="GM settings" onClick={()=>setSettingsOpen(value=>!value)}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9.7 3.4 10.3 2h3.4l.6 1.4 1.7.7 1.4-.6 2.4 2.4-.6 1.4.7 1.7 1.4.6v3.4l-1.4.6-.7 1.7.6 1.4-2.4 2.4-1.4-.6-1.7.7-.6 1.4h-3.4l-.6-1.4-1.7-.7-1.4.6-2.4-2.4.6-1.4-.7-1.7L2 13.7v-3.4l1.4-.6.7-1.7-.6-1.4 2.4-2.4 1.4.6 1.7-.7Z"/><circle cx="12" cy="12" r="3"/></svg></button>}</div>
+      <div className="panel-title-actions secondary-actions"><a className="header-action help-button" aria-label="No Dice help" title="No Dice help" href="https://no-dice.ex-asperis.com" target="_blank" rel="noopener noreferrer">?</a><button type="button" className="header-action panel-close" aria-label="Close panel" title="Close panel" onClick={()=>sendPanel({type:'close'})}>×</button></div>
     </header>
-    {obr.role==='GM'&&settingsOpen&&<GMSettings settings={roomSettings} verifiableRollsAvailable={verifiableRollsAvailable} onSaved={()=>setSettingsOpen(false)}/>}
+    {obr.role==='GM'&&settingsOpen&&<GMSettings settings={roomSettings} verifiableRollsAvailable={verifiableRollsAvailable}/>}
     <section className="probability" aria-label="Probability distribution">
       <button type="button" className="section-heading section-toggle distribution-heading" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.distribution?'▸':'▾'}</span><strong>Distribution</strong></span><span className="distribution-stats" aria-label={chart?`Range ${chart.range?chart.range.join(' to '):chart.entries.length+' outcomes'}, mean ${chart.mean?.toFixed(2)??'unavailable'}, standard deviation ${chart.standardDeviation?.toFixed(2)??'unavailable'}, mode ${display(chart.mode??'—')}`:'Range, mean, standard deviation, and mode unavailable'}><span>{chart?.range?`Range ${chart.range[0]}–${chart.range[1]}`:chart?`${chart.entries.length} outcomes`:'Range —'}</span><span>Mean {chart?.mean?.toFixed(2)??'—'}</span><span>SD {chart?.standardDeviation?.toFixed(2)??'—'}</span><span>Mode {chart?display(chart.mode??'—'):'—'}</span></span><span className="distribution-method">{chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
       {!collapsed.distribution&&<>

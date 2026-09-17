@@ -1,6 +1,7 @@
 import type { Node } from './engine/ast';
 import { formatShort } from './engine/format';
 import { parseAuto } from './engine/parser';
+import { splitExpressionName } from './expressionName';
 
 export const DICE_SHORTCUTS = [
   { label: 'Coin', term: 'd{0,1}' },
@@ -26,9 +27,11 @@ function dieTerm(node: DiceNode): string {
 
 /** Append a shortcut, or increment the final matching unmodified die term. */
 export function insertDiceShortcut(source: string, term: string): string {
-  const pipe = source.indexOf('|');
-  const prefix = pipe < 0 ? source : source.slice(0, pipe);
-  const suffix = pipe < 0 ? '' : source.slice(pipe);
+  const named = splitExpressionName(source);
+  const bodySource = named.suffix ? source.slice(0, -named.suffix.length) : source;
+  const pipe = bodySource.indexOf('|');
+  const prefix = pipe < 0 ? bodySource : bodySource.slice(0, pipe);
+  const suffix = (pipe < 0 ? '' : bodySource.slice(pipe)) + named.suffix;
   const trimmed = prefix.trimEnd();
   const tail = pipe < 0 ? '' : prefix.slice(trimmed.length) + suffix;
   const shortcut = term.trimStart();

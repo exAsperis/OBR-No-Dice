@@ -1,0 +1,10 @@
+.obr-toggle{display:inline-flex;align-items:center;gap:8px;cursor:pointer;user-select:none}
+.obr-toggle input{position:absolute;width:1px;height:1px;margin:0;padding:0;opacity:0;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap}
+.gm-settings .obr-toggle input{width:1px;height:1px;border:0;padding:0;background:transparent}
+.obr-toggle-track{position:relative;display:inline-block;flex:none;width:32px;height:19px;border:1px solid color-mix(in srgb,var(--obr-text,#eee) 36%,transparent);border-radius:999px;background:var(--obr-paper,#222630);transition:background-color .16s ease,border-color .16s ease}
+.obr-toggle-track::after{content:'';position:absolute;top:2px;left:2px;width:13px;height:13px;border-radius:50%;background:var(--obr-text,#eee);box-shadow:0 1px 3px #0005;transition:transform .16s ease,background-color .16s ease}
+.obr-toggle input:checked+.obr-toggle-track{background:var(--obr-primary,#a68bfa);border-color:var(--obr-primary,#a68bfa)}
+.obr-toggle input:checked+.obr-toggle-track::after{transform:translateX(13px);background:var(--obr-primary-contrast,#111)}
+.obr-toggle input:focus-visible+.obr-toggle-track{outline:2px solid var(--obr-primary,#a68bfa);outline-offset:2px}
+.obr-toggle:has(input:disabled){opacity:.55;cursor:default}
+@media(prefers-reduced-motion:reduce){.obr-toggle-track,.obr-toggle-track::after{transition:none}}

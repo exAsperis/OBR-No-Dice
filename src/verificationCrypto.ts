@@ -1,6 +1,6 @@
 import type { Rng } from './engine/evaluate';
 
-export const VERIFY_VERSION = 'NODICE_VERIFIABLE_ROLL_V1';
+export const VERIFY_VERSION = 'NODICE_VERIFIABLE_ROLL_V2';
 const encoder = new TextEncoder();
 export const hex = (bytes: Uint8Array): string => Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
 export function unhex(value: string): Uint8Array {

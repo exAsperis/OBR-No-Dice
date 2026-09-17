@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { splitExpressionName } from '../expressionName';
 
 interface Notation {
   short: string;
@@ -12,6 +13,7 @@ export function NotationPopover({ expression, notation }: { expression: string; 
   const [position, setPosition] = useState({ top: 0, left: 0, maxHeight: 0 });
   const trigger = useRef<HTMLButtonElement>(null);
   const popover = useRef<HTMLDivElement>(null);
+  const suffix = splitExpressionName(expression).suffix;
 
   useLayoutEffect(() => {
     if (!open) return;
@@ -47,7 +49,7 @@ export function NotationPopover({ expression, notation }: { expression: string; 
   return <>
     <button ref={trigger} type="button" className="notation-trigger" aria-expanded={open} aria-controls={open ? 'notation-popover' : undefined} onClick={() => setOpen(value => !value)}>▸ Notation</button>
     {open && createPortal(<div id="notation-popover" ref={popover} className="notation-popover" role="region" aria-label="Notation" style={position}>
-      <dl><dt>Original</dt><dd>{expression}</dd><dt>Short</dt><dd>{notation.short}</dd><dt>Readable long</dt><dd>{notation.longReadable}</dd><dt>Expanded</dt><dd>{notation.longExpanded}</dd></dl>
+      <dl><dt>Original</dt><dd>{expression}</dd><dt>Short</dt><dd>{notation.short}{suffix}</dd><dt>Readable long</dt><dd>{notation.longReadable}{suffix}</dd><dt>Expanded</dt><dd>{notation.longExpanded}{suffix}</dd></dl>
     </div>, document.body)}
   </>;
 }

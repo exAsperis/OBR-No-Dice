@@ -28,7 +28,7 @@ describe('main panel position', () => {
     saveDraft('room-a', 'one', '2d6');
     saveDraft('room-b', 'one', 'd20');
     expect(loadCollapsed('one')).toEqual({ distribution: true, recent: false, history: true });
-    expect(loadCollapsed('two')).toEqual({ distribution: false, recent: false, history: false });
+    expect(loadCollapsed('two')).toEqual({ distribution: false, recent: false, history: true });
     expect(loadDraft('room-a', 'one')).toBe('2d6');
     expect(loadDraft('room-b', 'one')).toBe('d20');
     expect(loadDraft('room-a', 'two')).toBeNull();

@@ -8,7 +8,7 @@ import { rollExpression, type RollExpressionInput } from './rollService';
 import type { VerificationRecord } from './protocol';
 import { VERIFY_VERSION, SeededRng, commitment, equalHex, finalSeed, secret, type RollIdentity } from './verificationCrypto';
 
-export const VERIFY_CHANNEL=`${EXTENSION_ID}/verifiable-roll/v1`;
+export const VERIFY_CHANNEL=`${EXTENSION_ID}/verifiable-roll/v2`;
 const TIMEOUT=8000, PRESENCE_TTL=30000, MAX_SESSIONS=64;
 type Role='GM'|'PLAYER';
 interface Peer { connectionId:string; role:Role; lastSeen:number }
