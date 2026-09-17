@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.22.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.22.1.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -168,3 +168,7 @@ Version 0.21.0 starts with History collapsed and other sections expanded for pla
 Version 0.22.0 makes the expression editor wrap and grow with long expressions (up to a scrollable limit); Enter rolls and Shift+Enter inserts a line break. Adding a custom shortcut now combines both expressions' interpretation rules and `#` names: current rules precede shortcut rules and therefore win overlapping first matches, while both names appear as `# Current + Shortcut`. The one combined interpretation table evaluates the final numeric result. Ledger “Show work” uses a die/updated-expression column pair without divider lines or a duplicate final result; new roll records carry optional stage-aligned die labels, while older records remain readable without them. The dice grammar, verified-roll protocol V2, and external API remain compatible; the result wire format only gains the optional `stepDice` field.
 
 The latest-result bar, its outcome label, and roll-count badge use notification blue for ordinary rolls and gold for verified rolls. The actual result pill stays notification blue in both cases.
+
+The Help and Close header controls use consistent 24 × 24 pixel vector icons at every panel width.
+
+Version 0.22.1 shows the collapsed Most Recent Result value in a compact notification-blue pill with white text; the verification mark remains outside the pill. This visual fix does not change roll results or the external API.
