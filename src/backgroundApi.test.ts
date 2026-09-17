@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { NO_DICE_API_REQUEST, NO_DICE_API_RESPONSE } from './noDiceApi';
-import { RESULT_CHANNEL } from './protocol';
+import { RESULT_CHANNEL, type RollResult } from './protocol';
 import { loadHistory } from './persistence';
+import { LOCAL_CHANNEL } from './revealProtocol';
 
 const state = vi.hoisted(() => ({
   listeners: new Map<string, Array<(event: { data: unknown; connectionId: string }) => void>>(),
@@ -10,6 +11,8 @@ const state = vi.hoisted(() => ({
 vi.mock('@owlbear-rodeo/sdk', () => ({ default: {
   onReady: (callback: () => Promise<void>) => { void callback(); },
   room: { id: 'room' }, player: { id: 'player', getRole: async () => 'PLAYER', getName: async () => 'Bryan' },
+  viewport: { getWidth: async () => 1200, getHeight: async () => 800 },
+  popover: { open: async () => {}, close: async () => {} },
   broadcast: {
     onMessage: (channel: string, callback: (event: { data: unknown; connectionId: string }) => void) => {
       state.listeners.set(channel, [...(state.listeners.get(channel) ?? []), callback]);
@@ -21,7 +24,12 @@ vi.mock('@owlbear-rodeo/sdk', () => ({ default: {
 
 describe('background API registration', () => {
   it('responds to LOCAL requests with the action popover closed and registers once', async () => {
-    class LocalChannel { onmessage: unknown; constructor(_name: string) {} postMessage(_message: unknown) {} }
+    class LocalChannel {
+      static instances: LocalChannel[] = [];
+      onmessage: ((event: { data: unknown }) => void) | null = null;
+      constructor(readonly name: string) { LocalChannel.instances.push(this); }
+      postMessage(_message: unknown) {}
+    }
     vi.stubGlobal('BroadcastChannel', LocalChannel);
     await import('./background');
     await vi.waitFor(() => expect(state.listeners.get(NO_DICE_API_REQUEST)).toHaveLength(1));
@@ -35,6 +43,9 @@ describe('background API registration', () => {
     listener({ data: { protocolVersion: 1, type: 'roll', requestId: 'recorded', expression: 'd1' }, connectionId: 'local' });
     await vi.waitFor(() => expect(state.sent.filter(item => item.channel === NO_DICE_API_RESPONSE)).toHaveLength(2));
     expect(state.sent.find(item => item.channel === RESULT_CHANNEL)).toMatchObject({ options: { destination: 'ALL' } });
+    expect(loadHistory('room', 'player').map(item => item.requestId)).not.toContain('recorded');
+    const recorded = state.sent.find(item => item.channel === RESULT_CHANNEL)!.data as RollResult;
+    LocalChannel.instances.find(item => item.name === LOCAL_CHANNEL)!.onmessage?.({ data: { type: 'revealed', roomId: 'room', playerId: 'player', result: recorded } });
     expect(loadHistory('room', 'player').map(item => item.requestId)).toContain('recorded');
     vi.unstubAllGlobals();
   });

@@ -5,7 +5,8 @@ import { applyOwlbearTheme } from './theme';
 import { EXTENSION_ID } from './constants';
 import { isResult, type RollResult } from './protocol';
 import { isLocalMessage, LOCAL_CHANNEL, REVEAL_POPOVER_ID, type LocalMessage } from './revealProtocol';
-import { nextRevealCount, REVEAL_LINE_INTERVAL_MS, reductionDiff, revealLines } from './revealLines';
+import { nextRevealCount, reductionDiff, revealLines } from './revealLines';
+import { DEFAULT_ROOM_SETTINGS, readRoomSettings } from './roomSettings';
 import type { Distribution } from './engine/probability';
 import './reveal.css';
 
@@ -76,18 +77,30 @@ function Reveal() {
   const [rerolling, setRerolling] = useState(false);
   const [rerollError, setRerollError] = useState('');
   const [dismissTiming, setDismissTiming] = useState<{ requestId: string; deadline: number; remainingMs: number; startScale: number } | null>(null);
+  const [calculationSpeedMs, setCalculationSpeedMs] = useState(DEFAULT_ROOM_SETTINGS.calculationSpeedMs);
+  const [finishedRequestId, setFinishedRequestId] = useState<string | null>(null);
   const channel = useRef<BroadcastChannel | null>(null);
   const identity = useRef<{ roomId: string; playerId: string } | null>(null);
   const list = useRef<HTMLDivElement | null>(null);
   const dragStart = useRef<{ x: number; y: number } | null>(null);
-  const resumeCount = useRef(1);
+  const progress = useRef<{ requestId: string; count: number } | null>(null);
   const resumeDeadline = useRef<number | null>(null);
 
   useEffect(() => {
     let cleanupTheme: (() => void) | undefined;
+    let cleanupSettings: (() => void) | undefined;
+    let active = true;
     OBR.onReady(async () => {
+      if (!active) return;
       identity.current = { roomId: OBR.room.id, playerId: OBR.player.id };
       try { applyOwlbearTheme(await OBR.theme.getTheme()); cleanupTheme = OBR.theme.onChange(applyOwlbearTheme); } catch { /* CSS fallback. */ }
+      try {
+        let changed = false;
+        cleanupSettings = OBR.room.onMetadataChange(metadata => { changed = true; setCalculationSpeedMs(readRoomSettings(metadata).calculationSpeedMs); });
+        const metadata = await OBR.room.getMetadata();
+        if (active && !changed) setCalculationSpeedMs(readRoomSettings(metadata).calculationSpeedMs);
+      } catch { /* Default pace remains usable. */ }
+      if (!active) return;
       const local = new BroadcastChannel(LOCAL_CHANNEL);
       channel.current = local;
       local.onmessage = (event: MessageEvent<unknown>) => {
@@ -97,9 +110,11 @@ function Reveal() {
         if (event.data.type !== 'show' || !isResult(event.data.result)) return;
         const total=revealLines(event.data.result).length;
         const resumed=Math.max(1,Math.min(total,event.data.resume?.visibleCount??1));
-        resumeCount.current=resumed;
+        const newResult=event.data.result.requestId!==progress.current?.requestId;
+        progress.current={requestId:event.data.result.requestId,count:resumed};
         resumeDeadline.current=Number.isFinite(event.data.resume?.dismissDeadline) ? event.data.resume!.dismissDeadline! : null;
         setDismissTiming(null);
+        if (newResult) setFinishedRequestId(null);
         setVisibleCount(resumed);
         setHighlightedRequestId(event.data.resume?.highlighted?event.data.result.requestId:null);
         setRerolling(false);
@@ -108,22 +123,23 @@ function Reveal() {
       };
       local.postMessage({ type: 'ready', ...identity.current } satisfies LocalMessage);
     });
-    return () => { cleanupTheme?.(); channel.current?.close(); channel.current = null; };
+    return () => { active = false; cleanupTheme?.(); cleanupSettings?.(); channel.current?.close(); channel.current = null; };
   }, []);
 
   useEffect(() => {
     if (!result) return;
     const total = revealLines(result).length;
-    let shown = resumeCount.current;
-    resumeCount.current = 1;
+    let shown = progress.current?.requestId === result.requestId ? progress.current.count : 1;
     if (shown >= total) return;
+    if (calculationSpeedMs === 0) { progress.current = { requestId: result.requestId, count: total }; setVisibleCount(total); return; }
     const timer = window.setInterval(() => {
       shown = nextRevealCount(shown, total);
+      progress.current = { requestId: result.requestId, count: shown };
       setVisibleCount(shown);
       if (shown >= total) window.clearInterval(timer);
-    }, REVEAL_LINE_INTERVAL_MS);
+    }, calculationSpeedMs);
     return () => window.clearInterval(timer);
-  }, [result]);
+  }, [result, calculationSpeedMs]);
   useEffect(() => {
     if (!result || result.error) return;
     const worker = new Worker(new URL('./probability.worker.ts', import.meta.url), { type: 'module' });
@@ -135,13 +151,18 @@ function Reveal() {
   }, [result]);
   const lines = useMemo(() => result ? revealLines(result) : [], [result]);
   const visible = lines.slice(0, visibleCount);
+  useEffect(() => {
+    if (result && visibleCount >= lines.length && identity.current
+      && (calculationSpeedMs === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches || finishedRequestId === result.requestId))
+      channel.current?.postMessage({ type: 'revealed', ...identity.current, result } satisfies LocalMessage);
+  }, [result, visibleCount, lines.length, calculationSpeedMs, finishedRequestId]);
   const distribution = chart && chart.requestId === result?.requestId ? chart.distribution : null;
   useEffect(() => {
     if (!result || visibleCount < lines.length) return;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    const timer = window.setTimeout(() => setHighlightedRequestId(result.requestId), reducedMotion ? 0 : 820);
+    const timer = window.setTimeout(() => setHighlightedRequestId(result.requestId), reducedMotion || calculationSpeedMs === 0 ? 0 : 820);
     return () => window.clearTimeout(timer);
-  }, [result, visibleCount, lines.length]);
+  }, [result, visibleCount, lines.length, calculationSpeedMs]);
   useLayoutEffect(() => {
     const scroller = list.current;
     if (!scroller) return;
@@ -178,7 +199,7 @@ function Reveal() {
     channel.current?.postMessage({ type: 'reroll', ...identity.current, requestId: result.requestId } satisfies LocalMessage);
   }
 
-  return <main className="reveal-shell" aria-label="Roll result">
+  return <main className={`reveal-shell${calculationSpeedMs === 0 ? ' instant' : ''}`} aria-label="Roll result">
     <div key={autoDismiss && dismissTiming ? `${dismissTiming.requestId}:${dismissTiming.deadline}` : `waiting:${result?.requestId}`} className={'dismiss-curtain'+(autoDismiss && dismissTiming?' running':'')} style={autoDismiss && dismissTiming ? { '--drain-duration': `${dismissTiming.remainingMs}ms`, '--drain-start': dismissTiming.startScale } as CSSProperties : undefined} aria-hidden="true"/>
     <header className="reveal-header" onPointerDown={event=>{if((event.target as HTMLElement).closest('button'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start&&identity.current){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)channel.current?.postMessage({type:'move',...identity.current,dx,dy,visibleCount,highlighted:highlightedRequestId===result?.requestId,dismissDeadline:dismissTiming?.deadline} satisfies LocalMessage);}}} onPointerCancel={()=>{dragStart.current=null;}}><div><strong>NO DICE</strong>{result&&<span>{result.playerName}</span>}</div><button type="button" onClick={dismiss} aria-label="Dismiss roll result">×</button></header>
     <div className="reveal-controls"><button type="button" onClick={reroll} disabled={!result || rerolling}>{rerolling ? 'Rolling…' : 'Reroll'}</button><label><input type="checkbox" checked={autoDismiss} onChange={event => { const enabled = event.target.checked; setAutoDismiss(enabled); localStorage.setItem(DISMISS_ENABLED_KEY, String(enabled)); }} /> Auto-dismiss</label><label htmlFor="dismiss-seconds">Seconds</label><input id="dismiss-seconds" type="number" min="1" max="3600" step="1" value={dismissSeconds} disabled={!autoDismiss} onChange={event => { const seconds = Number(event.target.value); if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600) return; setDismissSeconds(seconds); localStorage.setItem(DISMISS_SECONDS_KEY, String(seconds)); }} /></div>
@@ -188,7 +209,7 @@ function Reveal() {
       {visible.map((line, index) => {
         const previous = lines[index - 1]?.text;
         const change = previous === undefined ? null : line.final ? {prefix:'',removed:previous,added:line.text,suffix:''} : reductionDiff(previous, line.text);
-        return <div key={`${result?.requestId}-${index}`} className={`reveal-line ${line.final ? 'reveal-final' : ''} ${index ? 'reveal-entering' : ''}`} style={change ? { '--from-width': `${Math.min(change.removed.length, 90)}ch`, '--to-width': `${Math.min(change.added.length, 90)}ch` } as CSSProperties : undefined}>
+        return <div key={`${result?.requestId}-${index}`} className={`reveal-line ${line.final ? 'reveal-final' : ''} ${index ? 'reveal-entering' : ''}`} onAnimationEnd={line.final ? event => { if (event.target === event.currentTarget && event.animationName === 'reveal-drop') setFinishedRequestId(result!.requestId); } : undefined} style={change ? { '--from-width': `${Math.min(change.removed.length, 90)}ch`, '--to-width': `${Math.min(change.added.length, 90)}ch` } as CSSProperties : undefined}>
           {change ? <span className="reveal-transition" role={line.final ? 'status' : undefined} aria-label={line.final ? line.text : undefined}>
             <span>{change.prefix}</span>
             <span className="reveal-change"><span className="reveal-old-term" aria-hidden="true">{change.removed}</span><span className="reveal-new-term">{change.added}</span></span>

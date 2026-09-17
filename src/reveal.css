@@ -19,5 +19,6 @@
 @keyframes reveal-new{0%,30%{opacity:0}75%,100%{opacity:1}}
 @keyframes reveal-result{from{font-size:12px;color:var(--obr-text,#eee)}to{font-size:22px;color:#fff}}
 @media(prefers-reduced-motion:reduce){.reveal-entering,.reveal-entering .reveal-change,.reveal-entering .reveal-old-term,.reveal-entering .reveal-new-term,.reveal-final.reveal-entering .reveal-new-term{animation:none}.reveal-old-term{opacity:0!important}.reveal-new-term{opacity:1!important}}
+.reveal-shell.instant .reveal-entering,.reveal-shell.instant .reveal-entering .reveal-change,.reveal-shell.instant .reveal-entering .reveal-old-term,.reveal-shell.instant .reveal-entering .reveal-new-term,.reveal-shell.instant .reveal-final.reveal-entering .reveal-new-term{animation:none}.reveal-shell.instant .reveal-old-term{opacity:0}.reveal-shell.instant .reveal-new-term{opacity:1}
 html,body,#root{background:transparent}.reveal-header,.reveal-controls,.reveal-distribution{background:var(--glass-surface)}.reveal-controls input[type=number],.reveal-controls button,.reveal-header button{background:var(--glass-field);backdrop-filter:blur(8px)}
 .reveal-header{cursor:grab;user-select:none;touch-action:none}.reveal-header:active{cursor:grabbing}

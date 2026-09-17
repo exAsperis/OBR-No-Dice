@@ -1,6 +1,6 @@
 {
   "name": "No Dice (Local)",
-  "version": "0.13.1",
+  "version": "0.15.0",
   "manifest_version": 1,
   "description": "Local development build of No Dice.",
   "author": "ex Asperis",
@@ -12,7 +12,7 @@
     "icon": "http://localhost:5173/icon.svg",
     "popover": "http://localhost:5173/extension.html",
     "width": 80,
-    "height": 400
+    "height": 1240
   }
 }
 

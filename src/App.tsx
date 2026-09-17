@@ -15,6 +15,8 @@ import { applyDiceShortcutOnce } from './shortcuts';
 import { PANEL_CHANNEL, isPanelMessage, type PanelCommand, type PanelMessage } from './panelProtocol';
 import { DEFAULT_COLLAPSED, loadCollapsed, loadDraft, saveCollapsed, saveDraft } from './panelLayout';
 import { RELEASE_VERSION } from './version';
+import { DEFAULT_ROOM_SETTINGS, readRoomSettings, type RoomSettings } from './roomSettings';
+import { GMSettings } from './GMSettings';
 
 const display=displayValue;
 const MAX_VISIBLE_BARS=200;
@@ -35,6 +37,8 @@ export default function App() {
   const [selected,setSelected]=useState<RollResult|null>(null);
   const [chartRolls,setChartRolls]=useState<Value[]>([]);
   const [busy,setBusy]=useState(false);
+  const [roomSettings,setRoomSettings]=useState<RoomSettings>(DEFAULT_ROOM_SETTINGS);
+  const [settingsOpen,setSettingsOpen]=useState(false);
   const [collapsed,setCollapsed]=useState(DEFAULT_COLLAPSED);
   const [preferencesReady,setPreferencesReady]=useState(false);
   const panelChannel=useRef<BroadcastChannel|null>(null);
@@ -49,6 +53,7 @@ export default function App() {
   const revealChannel=useRef<BroadcastChannel|null>(null);
   const sequence=useRef(0);
   const historyRef=useRef<RollResult[]>([]);
+  const pendingLocalRolls=useRef(new Set<string>());
   const inputRef=useRef<HTMLInputElement|null>(null);
   const currentInput=useRef({expression,dialect:detectedDialect});
   currentInput.current={expression,dialect:detectedDialect};
@@ -84,6 +89,14 @@ export default function App() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[obr.roomId,obr.playerId,preferencesReady]);
   useEffect(()=>{
+    if(obr.status!=='ready')return;
+    let active=true;
+    let changed=false;
+    const unsubscribe=OBR.room.onMetadataChange(metadata=>{changed=true;setRoomSettings(readRoomSettings(metadata));});
+    void OBR.room.getMetadata().then(metadata=>{if(active&&!changed)setRoomSettings(readRoomSettings(metadata));}).catch(()=>{});
+    return ()=>{active=false;unsubscribe();};
+  },[obr.status]);
+  useEffect(()=>{
     if(!preferencesReady||!obr.roomId||!obr.playerId||!panelRef.current)return;
     const panel=panelRef.current;
     const roomId=obr.roomId, playerId=obr.playerId;
@@ -111,8 +124,11 @@ export default function App() {
     if(!obr.roomId||!obr.playerId)return;
     const channel=new BroadcastChannel(LOCAL_CHANNEL);revealChannel.current=channel;
     channel.onmessage=(event:MessageEvent<unknown>)=>{
-      if(!isLocalMessage(event.data)||event.data.type!=='show'||!isResult(event.data.result))return;
-      if(event.data.roomId===obr.roomId&&event.data.playerId===obr.playerId)add(event.data.result);
+      if(!isLocalMessage(event.data)||event.data.type!=='revealed'||!isResult(event.data.result))return;
+      if(event.data.roomId===obr.roomId&&event.data.playerId===obr.playerId){
+        add(event.data.result);
+        if(pendingLocalRolls.current.delete(event.data.result.requestId)){setSelected(event.data.result);setInputError('');}
+      }
     };
     return ()=>{channel.close();revealChannel.current=null;};
   // The listener uses refs and functional state updates to process current results.
@@ -143,9 +159,8 @@ export default function App() {
   },[expression,dialectHint]);
   useEffect(()=>{
     if(obr.status!=='ready'||!obr.playerId)return;
-    const resultOff=OBR.broadcast.onMessage(RESULT_CHANNEL,event=>{ if(isResult(event.data)&&event.data.visibility==='everyone') add(event.data); });
     const requestOff=OBR.broadcast.onMessage(REQUEST_CHANNEL,event=>{ if(obr.role==='GM'&&isRequest(event.data)&&event.data.expression.length<=1000&&event.data.visibility!=='gm') void perform(event.data,false); });
-    return ()=>{resultOff();requestOff();};
+    return ()=>{requestOff();};
   // Register once for this player. Other state is read from the current closure.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   },[obr.status,obr.playerId,obr.playerName,obr.role]);
@@ -161,9 +176,11 @@ export default function App() {
       if(local&&req.expression===currentInput.current.expression)currentInput.current.dialect=d;
       if(v==='everyone') await OBR.broadcast.sendMessage(RESULT_CHANNEL,result);
       if(v==='gm'&&obr.role!=='GM') await OBR.broadcast.sendMessage(GM_CHANNEL,await encryptForGm(result));
+      if(local)pendingLocalRolls.current.add(result.requestId);
       if(obr.roomId&&obr.playerId)revealChannel.current?.postMessage({type:'result',roomId:obr.roomId,playerId:obr.playerId,result} satisfies LocalMessage);
-      add(result); if(local){setSelected(result);setInputError('');}
+      if(local)setInputError('');
     } catch(error) {
+      pendingLocalRolls.current.delete(req.requestId);
       const message=error instanceof Error?error.message:'Roll failed';
       if(local)setInputError(message);
       else if((req.visibility??'everyone')==='everyone') {
@@ -225,13 +242,14 @@ export default function App() {
   </article>;
   return <main className="no-dice" ref={panelRef}>
     <header className="panel-title" onPointerDown={event=>{if((event.target as HTMLElement).closest('button'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)sendPanel({type:'move',dx,dy});}}} onPointerCancel={()=>{dragStart.current=null;}}>
-      <div className="header-brand"><img className="header-icon" src="./icon.svg" alt="" aria-hidden="true"/><h1>No Dice</h1><span className="version">v{RELEASE_VERSION}</span></div>
+      <div className="header-brand"><img className="header-icon" src="./icon.svg" alt="" aria-hidden="true"/><h1>No Dice</h1><span className="version">v{RELEASE_VERSION}</span></div>{obr.role==='GM'&&<button type="button" className="settings-toggle" aria-label="GM settings" aria-expanded={settingsOpen} title="GM settings" onClick={()=>setSettingsOpen(value=>!value)}>⚙</button>}
     </header>
+    {obr.role==='GM'&&settingsOpen&&<GMSettings settings={roomSettings} onSaved={()=>setSettingsOpen(false)}/>}
     <section className="probability" aria-label="Probability distribution">
       <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.distribution?'▸':'▾'}</span><strong>Distribution</strong></span><span>{chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
       {!collapsed.distribution&&<>
-        {chart&&<><div className="bars" role="img" aria-label="Probability mass chart with roll history and fairness overlay">{chart.entries.slice(0,MAX_VISIBLE_BARS).map((item,i)=>{const key=JSON.stringify(item.value),observed=fairCounts.get(key)??0,historic=historicCounts.get(key)??0,rate=fairness?.total?observed/fairness.total:0;return <div className={'bar-cell '+(selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(item.value)?'actual':'')} key={i} title={display(item.value)+': expected '+(item.probability*100).toFixed(3)+'%; ledger rolls '+historic}><div className="bar-pair"><div className="bar" style={{height:Math.max(3,item.probability/max*100)+'%'}}/>{fairness&&<div className="bar observed" style={{height:observed?Math.max(3,rate/max*100)+'%':'0'}}/>}</div>{historic>0&&<span className="history-mark">{historic}</span>}<small>{display(item.value)}</small></div>;})}</div>
-        <div className="stats"><span>{chart.range?'Range '+chart.range[0]+'–'+chart.range[1]:chart.entries.length+' outcomes'}</span>{chart.mean!==undefined&&<span>Mean {chart.mean.toFixed(2)}</span>}{chart.standardDeviation!==undefined&&<span>SD {chart.standardDeviation.toFixed(2)}</span>}<span>Mode {display(chart.mode??'—')}</span>{chartRolls.length>0&&<span>{chartRolls.length} ledger rolls</span>}</div></>}
+        <div className={`bars${chart ? '' : ' distribution-placeholder'}`} role={chart ? 'img' : undefined} aria-label={chart ? 'Probability mass chart with roll history and fairness overlay' : undefined} aria-hidden={chart ? undefined : true}>{chart?.entries.slice(0,MAX_VISIBLE_BARS).map((item,i)=>{const key=JSON.stringify(item.value),observed=fairCounts.get(key)??0,historic=historicCounts.get(key)??0,rate=fairness?.total?observed/fairness.total:0;return <div className={'bar-cell '+(selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(item.value)?'actual':'')} key={i} title={display(item.value)+': expected '+(item.probability*100).toFixed(3)+'%; ledger rolls '+historic}><div className="bar-pair"><div className="bar" style={{height:Math.max(3,item.probability/max*100)+'%'}}/>{fairness&&<div className="bar observed" style={{height:observed?Math.max(3,rate/max*100)+'%':'0'}}/>}</div>{historic>0&&<span className="history-mark">{historic}</span>}<small>{display(item.value)}</small></div>;})}</div>
+        <div className={`stats${chart ? '' : ' distribution-placeholder-stats'}`} aria-hidden={chart ? undefined : true}>{chart?<><span>{chart.range?'Range '+chart.range[0]+'–'+chart.range[1]:chart.entries.length+' outcomes'}</span>{chart.mean!==undefined&&<span>Mean {chart.mean.toFixed(2)}</span>}{chart.standardDeviation!==undefined&&<span>SD {chart.standardDeviation.toFixed(2)}</span>}<span>Mode {display(chart.mode??'—')}</span>{chartRolls.length>0&&<span>{chartRolls.length} ledger rolls</span>}</>:<><span>Range —</span><span>Mean —</span><span>SD —</span><span>Mode —</span></>}</div>
         <div className="fairness-controls">{notation&&<details className="notation"><summary>Notation</summary><dl><dt>Original</dt><dd>{expression}</dd><dt>Short</dt><dd>{notation.short}</dd><dt>Readable long</dt><dd>{notation.longReadable}</dd><dt>Expanded</dt><dd>{notation.longExpanded}</dd></dl></details>}<button type="button" onClick={toggleFairness} disabled={!expression.trim()} aria-pressed={fairnessRunning}>{fairnessRunning?'Stop':'Calculate fairness'}</button>{fairness&&<span className="fairness-legend"><i aria-hidden="true"/> Observed · {fairness.total.toLocaleString()} rolls{fairness.total>shownFair?' · '+(fairness.total-shownFair).toLocaleString()+' outside visible chart':''}</span>}</div>
         {fairnessError&&<div className="input-error" role="alert">{fairnessError}</div>}
       </>}

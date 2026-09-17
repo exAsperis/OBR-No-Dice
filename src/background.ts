@@ -211,6 +211,9 @@ OBR.onReady(async () => {
       send({ type: 'show', roomId, playerId, result: current, resume: revealResume ?? undefined });
       revealResume = null;
     }
+    if (message.type === 'revealed' && isResult(message.result)) {
+      appendHistory(roomId, playerId, message.result);
+    }
     if (message.type === 'dismiss') {
       current = null;
       popoverOpen = false;
@@ -235,7 +238,6 @@ OBR.onReady(async () => {
           });
           if (record.visibility === 'everyone') await OBR.broadcast.sendMessage(RESULT_CHANNEL, record);
           if (record.visibility === 'gm' && role !== 'GM') await OBR.broadcast.sendMessage(GM_CHANNEL, await encryptForGm(record));
-          appendHistory(roomId, playerId, record);
           present(record);
         } catch (error) {
           send({ type: 'reroll-error', roomId, playerId, message: error instanceof Error ? error.message : 'Reroll failed' });
@@ -270,8 +272,8 @@ OBR.onReady(async () => {
         else record.steps.pop();
       }
       if (size() > MAX_API_BROADCAST_BYTES) throw new Error('Roll record is too large for an Owlbear broadcast');
-      appendHistory(roomId, playerId, record);
       await OBR.broadcast.sendMessage(RESULT_CHANNEL, record, { destination: 'ALL' });
+      present(record);
     },
     respond: response => OBR.broadcast.sendMessage(NO_DICE_API_RESPONSE, response, { destination: 'LOCAL' }),
   });

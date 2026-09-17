@@ -1,2 +1,2 @@
 /** Keep synchronized with package.json, every manifest, and public URL query. */
-export const RELEASE_VERSION = "0.13.1";
+export const RELEASE_VERSION = "0.15.0";
