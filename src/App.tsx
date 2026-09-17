@@ -1,5 +1,5 @@
 import OBR from '@owlbear-rodeo/sdk';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { StatusPanel } from './components/StatusPanel';
 import type { Value } from './engine/evaluate';
 import type { Dialect } from './engine/ast';
@@ -22,6 +22,8 @@ import { VERIFY_LOCAL_CHANNEL, type VerificationLocalMessage } from './verificat
 import { SeededRng, VERIFY_VERSION } from './verificationCrypto';
 import { MAX_ROLL_STEPS } from './engine/evaluate';
 import { ResultDisplay } from './ResultDisplay';
+import { resizeExpressionEditor } from './expressionEditor';
+import { ledgerWorkRows } from './ledgerWork';
 
 const display=displayValue;
 const MAX_VISIBLE_BARS=200;
@@ -62,9 +64,18 @@ export default function App() {
   const sequence=useRef(0);
   const historyRef=useRef<RollResult[]>([]);
   const pendingLocalRolls=useRef(new Set<string>());
-  const inputRef=useRef<HTMLInputElement|null>(null);
+  const inputRef=useRef<HTMLTextAreaElement|null>(null);
   const currentInput=useRef({expression,dialect:detectedDialect});
   currentInput.current={expression,dialect:detectedDialect};
+  useLayoutEffect(()=>{if(inputRef.current)resizeExpressionEditor(inputRef.current);},[expression]);
+  useEffect(()=>{
+    const editor=inputRef.current;
+    if(!editor||typeof ResizeObserver==='undefined')return;
+    let width=editor.clientWidth;
+    const observer=new ResizeObserver(()=>{if(editor.clientWidth!==width){width=editor.clientWidth;resizeExpressionEditor(editor);}});
+    observer.observe(editor);
+    return ()=>observer.disconnect();
+  },[]);
   useEffect(()=>{
     if(!obr.roomId||!obr.playerId)return;
     if(new URLSearchParams(window.location.search).get('resume')==='1'){
@@ -272,7 +283,7 @@ export default function App() {
     <div className="entry-meta"><strong>{item.playerName}</strong><span className="entry-meta-right"><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
     <button type="button" className="expression-link" onClick={()=>{setExpression(item.expression);setDialectHint(item.dialect);setSelected(null);}} title="Put this expression back in the input">{item.expression}</button>
     {item.label&&<div className="entry-label">{item.label}</div>}
-    <details><summary>Show work</summary><ol>{(item.steps?.length?item.steps:item.trace).map((step,i)=><li key={i}>{step}</li>)}</ol></details>
+    <details className="work-details"><summary>Show work</summary><div className="work-rows">{ledgerWorkRows(item).map((row,i)=><div className="work-row" key={i}><span className="work-die">{row.die}</span><span className="work-expression">{row.expression}</span></div>)}</div></details>
     <ResultDisplay result={item}/>
   </article>;
   return <main className="no-dice" ref={panelRef}>
@@ -284,14 +295,14 @@ export default function App() {
     <section className="probability" aria-label="Probability distribution">
       <button type="button" className="section-heading section-toggle distribution-heading" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.distribution?'▸':'▾'}</span><strong>Distribution</strong></span><span className="distribution-stats" aria-label={chart?`Range ${chart.range?chart.range.join(' to '):chart.entries.length+' outcomes'}, mean ${chart.mean?.toFixed(2)??'unavailable'}, standard deviation ${chart.standardDeviation?.toFixed(2)??'unavailable'}, mode ${display(chart.mode??'—')}`:'Range, mean, standard deviation, and mode unavailable'}><span>{chart?.range?`Range ${chart.range[0]}–${chart.range[1]}`:chart?`${chart.entries.length} outcomes`:'Range —'}</span><span>Mean {chart?.mean?.toFixed(2)??'—'}</span><span>SD {chart?.standardDeviation?.toFixed(2)??'—'}</span><span>Mode {chart?display(chart.mode??'—'):'—'}</span></span><span className="distribution-method">{chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
       {!collapsed.distribution&&<>
-        <div className={`bars${chart ? '' : ' distribution-placeholder'}`} role={chart ? 'img' : undefined} aria-label={chart ? 'Probability mass chart with roll history and fairness overlay' : undefined} aria-hidden={chart ? undefined : true}>{chart?.entries.slice(0,MAX_VISIBLE_BARS).map((item,i)=>{const key=JSON.stringify(item.value),observed=fairCounts.get(key)??0,historic=historicCounts.get(key)??0,rate=fairness?.total?observed/fairness.total:0;return <div className={'bar-cell '+(selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(item.value)?'actual':'')} key={i} title={display(item.value)+': expected '+(item.probability*100).toFixed(3)+'%; ledger rolls '+historic}><div className="bar-pair"><div className="bar" style={{height:Math.max(3,item.probability/max*100)+'%'}}/>{fairness&&<div className="bar observed" style={{height:observed?Math.max(3,rate/max*100)+'%':'0'}}/>}</div>{historic>0&&<span className="history-mark">{historic}</span>}<small>{display(item.value)}</small></div>;})}</div>
+        <div className={`bars${chart ? '' : ' distribution-placeholder'}`} role={chart ? 'img' : undefined} aria-label={chart ? 'Probability mass chart with roll history and fairness overlay' : undefined} aria-hidden={chart ? undefined : true}>{chart?.entries.slice(0,MAX_VISIBLE_BARS).map((item,i)=>{const key=JSON.stringify(item.value),observed=fairCounts.get(key)??0,historic=historicCounts.get(key)??0,rate=fairness?.total?observed/fairness.total:0;const actual=selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(item.value);return <div className={`bar-cell${actual?' actual':''}${actual&&selected.verification?.state==='verified'?' verified':''}`} key={i} title={display(item.value)+': expected '+(item.probability*100).toFixed(3)+'%; ledger rolls '+historic}><div className="bar-pair"><div className="bar" style={{height:Math.max(3,item.probability/max*100)+'%'}}/>{fairness&&<div className="bar observed" style={{height:observed?Math.max(3,rate/max*100)+'%':'0'}}/>}</div>{historic>0&&<span className="history-mark">{historic}</span>}<small>{display(item.value)}</small></div>;})}</div>
         {fairness&&<div className="fairness-controls"><span className="fairness-legend"><i aria-hidden="true"/> Observed · {fairness.total.toLocaleString()} rolls{fairness.total>shownFair?' · '+(fairness.total-shownFair).toLocaleString()+' outside visible chart':''}</span><button type="button" className="fairness-reset" onClick={resetFairness} aria-label="Reset observed fairness results">Reset</button></div>}
         {fairnessError&&<div className="input-error" role="alert">{fairnessError}</div>}
       </>}
     </section>
     <form className={`composer${roomSettings.verifiableRollsEnabled&&verifiableRollsAvailable?' verifiable-available':''}`} onSubmit={e=>{e.preventDefault();submit();}}>
       <div className="composer-heading"><label htmlFor="expression">Expression</label>{notation&&<NotationPopover expression={expression} notation={notation}/>}</div>
-      <div className="expression-row"><input id="expression" ref={inputRef} autoComplete="off" spellCheck={false} value={expression} onChange={e=>{currentInput.current.expression=e.target.value;setExpression(e.target.value);setDialectHint(undefined);setSelected(null);setInputError('');}} placeholder="Enter expression" aria-describedby={inputError||chartError?'input-error':undefined}/><button type="button" className="clear-expression" disabled={!expression} onClick={()=>{currentInput.current.expression='';setExpression('');setDialectHint(undefined);setSelected(null);setInputError('');inputRef.current?.focus();}} aria-label="Clear expression">Clear</button><select aria-label="Roll audience" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">All</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" className="roll-button" disabled={busy||!expression.trim()}>Roll</button></div>
+      <div className="expression-row"><textarea id="expression" ref={inputRef} rows={1} autoComplete="off" spellCheck={false} value={expression} onChange={e=>{currentInput.current.expression=e.target.value;setExpression(e.target.value);setDialectHint(undefined);setSelected(null);setInputError('');}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();if(!busy&&expression.trim())submit();}}} placeholder="Enter expression" title="Enter to roll; Shift+Enter for a new line" aria-describedby={inputError||chartError?'input-error':undefined}/><button type="button" className="clear-expression" disabled={!expression} onClick={()=>{currentInput.current.expression='';setExpression('');setDialectHint(undefined);setSelected(null);setInputError('');inputRef.current?.focus();}} aria-label="Clear expression">Clear</button><select aria-label="Roll audience" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">All</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" className="roll-button" disabled={busy||!expression.trim()}>Roll</button></div>
       {inputError&&<div id="input-error" className="input-error" role="alert">{inputError}</div>}
       {!inputError&&chartError&&<div id="input-error" className="input-error" role="status">{chartError}</div>}
     </form>

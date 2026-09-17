@@ -8,14 +8,16 @@ const precedence = (node: Node) => node.kind === 'binary' ? (node.op === '+' || 
 export class PresentationRecorder {
   private replacements = new WeakMap<Node, string>();
   readonly stages: string[];
+  /** Die responsible for each stage, aligned with stages; blank means a non-roll reduction. */
+  readonly stageDice: string[];
   private root: Node;
-  constructor(root: Node, private enabled = true) { this.root = root.kind === 'interpret' ? root.expression : root; this.stages = enabled ? [formatShort(this.root)] : []; }
+  constructor(root: Node, private enabled = true) { this.root = root.kind === 'interpret' ? root.expression : root; this.stages = enabled ? [formatShort(this.root)] : []; this.stageDice = enabled ? [''] : []; }
 
   replace(node: Node, text: string): void { if (this.enabled) this.replacements.set(node, text); }
-  show(): void {
+  show(rolledDie = ''): void {
     if (!this.enabled) return;
     const next = this.render(this.root);
-    if (next !== this.stages.at(-1)) this.stages.push(next);
+    if (next !== this.stages.at(-1)) { this.stages.push(next); this.stageDice.push(rolledDie); }
   }
   isRoot(node: Node): boolean { return node === this.root; }
 

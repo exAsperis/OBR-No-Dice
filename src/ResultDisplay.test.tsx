@@ -14,8 +14,15 @@ describe('shared result presentation', () => {
     const { container } = render(<ResultDisplay result={result} />);
     expect(screen.getByText('Initiative:')).not.toBe(screen.getByText('5'));
     expect(container.querySelector('.roll-result-pill')?.textContent).toBe('5');
+    expect(container.querySelector('.roll-result.verified')).not.toBeNull();
     expect(screen.queryByText('Verified')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Show verification details' }));
     expect(screen.getByRole('region', { name: 'Verification details' }).textContent).toContain('roll-1');
+  });
+  it('keeps ordinary and failed rolls out of the gold result scheme', () => {
+    const { container, rerender } = render(<ResultDisplay result={{ ...result, verification: undefined }} />);
+    expect(container.querySelector('.roll-result.verified')).toBeNull();
+    rerender(<ResultDisplay result={{ ...result, verification: { ...result.verification!, state: 'failed' } }} />);
+    expect(container.querySelector('.roll-result.verified')).toBeNull();
   });
 });

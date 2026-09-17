@@ -1,6 +1,6 @@
 import type { Node } from './engine/ast';
 import { formatShort } from './engine/format';
-import { parseAuto } from './engine/parser';
+import { interpretationPipe, parseAuto } from './engine/parser';
 import { splitExpressionName } from './expressionName';
 
 export const DICE_SHORTCUTS = [
@@ -25,16 +25,20 @@ function dieTerm(node: DiceNode): string {
   return formatShort({ ...node, quantity: { kind: 'literal', value: 1, span: node.quantity.span }, resolution: 'inferred' });
 }
 
-/** Append a shortcut, or increment the final matching unmodified die term. */
-export function insertDiceShortcut(source: string, term: string): string {
+interface ShortcutParts { body: string; rules: string; hasPipe: boolean; name?: string; nameSuffix: string }
+function parts(source: string): ShortcutParts {
   const named = splitExpressionName(source);
-  const bodySource = named.suffix ? source.slice(0, -named.suffix.length) : source;
-  const pipe = bodySource.indexOf('|');
-  const prefix = pipe < 0 ? bodySource : bodySource.slice(0, pipe);
-  const suffix = (pipe < 0 ? '' : bodySource.slice(pipe)) + named.suffix;
+  const withoutName = named.suffix ? source.slice(0, -named.suffix.length) : source;
+  const pipe = interpretationPipe(withoutName);
+  return { body: pipe < 0 ? withoutName : withoutName.slice(0, pipe), rules: pipe < 0 ? '' : withoutName.slice(pipe + 1), hasPipe: pipe >= 0, name: named.name, nameSuffix: named.suffix };
+}
+
+/** Preserve the existing arithmetic composition and matching-die increment. */
+function combineBodies(prefix: string, term: string, preserveTrailing: boolean): string {
   const trimmed = prefix.trimEnd();
-  const tail = pipe < 0 ? '' : prefix.slice(trimmed.length) + suffix;
+  const tail = preserveTrailing ? prefix.slice(trimmed.length) : '';
   const shortcut = term.trimStart();
+  if (!shortcut.trim()) return prefix;
   const leadingOperator = /^[+\-*/]/.test(shortcut) ? shortcut[0] : null;
   const body = leadingOperator ? shortcut.slice(1).trimStart() : shortcut;
   const trailingOperator = /[+\-*/]$/.test(trimmed);
@@ -52,12 +56,29 @@ export function insertDiceShortcut(source: string, term: string): string {
         && final.quantity.kind === 'literal' && Number.isInteger(final.quantity.value)
         && dieTerm(final) === dieTerm(shortcutAst)) {
       const replacement = `${final.quantity.value + 1}${dieTerm(final)}`;
-      return prefix.slice(0, final.span.start) + replacement + prefix.slice(final.span.end) + suffix;
+      return prefix.slice(0, final.span.start) + replacement + prefix.slice(final.span.end);
     }
     return `${trimmed} + ${body}${tail}`;
   } catch {
     return `${trimmed} + ${body}${tail}`;
   }
+}
+
+/** Append a shortcut, combining each side's numeric term, interpretation rules, and name. */
+export function insertDiceShortcut(source: string, term: string): string {
+  const current = parts(source), incoming = parts(term);
+  let result = combineBodies(current.body, incoming.body.trimEnd(), current.hasPipe || !!current.nameSuffix);
+  if (current.hasPipe && incoming.hasPipe) {
+    const left = current.rules.trimEnd(), right = incoming.rules.trim();
+    const separator = left.trim() && right ? (left.trimEnd().endsWith(';') ? ' ' : '; ') : '';
+    result += `|${left || (right ? ' ' : '')}${separator}${right}`;
+  } else if (current.hasPipe) result += `|${current.rules}`;
+  else if (incoming.hasPipe) result += `${result && !/\s$/.test(result) ? ' ' : ''}|${incoming.rules}`;
+
+  if (current.name && incoming.name) result = `${result.trimEnd()} # ${current.name} + ${incoming.name}`;
+  else if (current.nameSuffix) result += current.nameSuffix;
+  else if (incoming.nameSuffix) result += `${result && !/\s$/.test(result) ? ' ' : ''}${incoming.nameSuffix}`;
+  return result;
 }
 
 /** A click may be relayed more than once when multiple background frames are active. */

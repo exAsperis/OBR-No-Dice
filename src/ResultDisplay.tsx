@@ -32,7 +32,7 @@ export function ResultDisplay({ result, announce = false }: { result: RollResult
     return () => { window.removeEventListener('resize', place); document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', key); };
   }, [open]);
   const verification = result.verification;
-  return <div className="roll-result" role={announce ? 'status' : undefined}>
+  return <div className={`roll-result${verification?.state === 'verified' ? ' verified' : ''}`} role={announce ? 'status' : undefined}>
     <span className="roll-result-heading">{result.error ? 'ERROR' : resultHeading(result.expression)}:</span>
     {verification && <button ref={trigger} type="button" className={`verification-check ${verification.state}`} aria-label={verification.state === 'verified' ? 'Show verification details' : 'Show verification failure details'} aria-expanded={open} onClick={() => setOpen(value => !value)}>{verification.state === 'verified' ? '✓' : '!'}</button>}
     <strong className="roll-result-pill">{result.error ?? displayValue(result.value)}</strong>

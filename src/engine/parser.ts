@@ -210,7 +210,7 @@ class Parser {
 }
 
 export interface ParsedDocument { source:string; tokens:Token[]; ast:Node; diagnostics:Diagnostic[] }
-function interpretationPipe(source:string):number{
+export function interpretationPipe(source:string):number{
   let braces=0,brackets=0,parentheses=0;
   for(let index=0;index<source.length;index++){
     const char=source[index];
