@@ -1,16 +1,16 @@
 {
   "name": "No Dice",
-  "version": "0.20.2",
+  "version": "0.20.1",
   "manifest_version": 1,
   "description": "Random expressions, exact probabilities, and transparent roll receipts.",
   "author": "ex Asperis",
   "homepage_url": "https://github.com/exAsperis/No-Dice",
-  "icon": "https://no-dice.ex-asperis.com/icon.svg?v=0.20.2",
-  "background_url": "https://no-dice.ex-asperis.com/background.html?v=0.20.2",
+  "icon": "https://no-dice.ex-asperis.com/icon.svg?v=0.20.1",
+  "background_url": "https://no-dice.ex-asperis.com/background.html?v=0.20.1",
   "action": {
     "title": "No Dice",
-    "icon": "https://no-dice.ex-asperis.com/icon.svg?v=0.20.2",
-    "popover": "https://no-dice.ex-asperis.com/extension.html?v=0.20.2",
+    "icon": "https://no-dice.ex-asperis.com/icon.svg?v=0.20.1",
+    "popover": "https://no-dice.ex-asperis.com/extension.html?v=0.20.1",
     "width": 80,
     "height": 1240
   }

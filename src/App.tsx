@@ -18,6 +18,9 @@ import { RELEASE_VERSION } from './version';
 import { DEFAULT_ROOM_SETTINGS, readRoomSettings, type RoomSettings } from './roomSettings';
 import { GMSettings } from './GMSettings';
 import { NotationPopover } from './components/NotationPopover';
+import { VERIFY_LOCAL_CHANNEL, type VerificationLocalMessage } from './verificationBridge';
+import { SeededRng } from './verificationCrypto';
+import { MAX_ROLL_STEPS } from './engine/evaluate';
 
 const display=displayValue;
 const MAX_VISIBLE_BARS=200;
@@ -39,6 +42,9 @@ export default function App() {
   const [chartRolls,setChartRolls]=useState<Value[]>([]);
   const [busy,setBusy]=useState(false);
   const [roomSettings,setRoomSettings]=useState<RoomSettings>(DEFAULT_ROOM_SETTINGS);
+  const [verifiableRollsAvailable,setVerifiableRollsAvailable]=useState(false);
+  const verifierChannel=useRef<BroadcastChannel|null>(null);
+  const pendingVerification=useRef(new Map<string,(record?:RollResult['verification'])=>void>());
   const [settingsOpen,setSettingsOpen]=useState(false);
   const [collapsed,setCollapsed]=useState(DEFAULT_COLLAPSED);
   const [preferencesReady,setPreferencesReady]=useState(false);
@@ -97,6 +103,17 @@ export default function App() {
     void OBR.room.getMetadata().then(metadata=>{if(active&&!changed)setRoomSettings(readRoomSettings(metadata));}).catch(()=>{});
     return ()=>{active=false;unsubscribe();};
   },[obr.status]);
+  useEffect(()=>{
+    if(obr.status!=='ready'||!obr.roomId||!obr.playerId)return;
+    const channel=new BroadcastChannel(VERIFY_LOCAL_CHANNEL);verifierChannel.current=channel;
+    channel.onmessage=(event:MessageEvent<VerificationLocalMessage>)=>{
+      const m=event.data;if(!m||m.roomId!==obr.roomId||m.playerId!==obr.playerId)return;
+      if(m.type==='status')setVerifiableRollsAvailable(m.available===true);
+      if(m.type==='roll-response'){pendingVerification.current.get(m.requestId)?.(m.verification);pendingVerification.current.delete(m.requestId);}
+    };
+    channel.postMessage({type:'status-request',roomId:obr.roomId,playerId:obr.playerId} satisfies VerificationLocalMessage);
+    return ()=>{channel.close();verifierChannel.current=null;for(const done of pendingVerification.current.values())done();pendingVerification.current.clear();setVerifiableRollsAvailable(false);};
+  },[obr.status,obr.roomId,obr.playerId,obr.role]);
   useEffect(()=>{
     if(!preferencesReady||!obr.roomId||!obr.playerId||!panelRef.current)return;
     const panel=panelRef.current;
@@ -169,10 +186,21 @@ export default function App() {
     setBusy(true);
     try {
       const v=req.visibility??'everyone';
-      const {record:result}=rollExpression({
+      const input={
         requestId:req.requestId,expression:req.expression,dialect:req.dialect,visibility:v,
         playerId:obr.playerId??'',playerName:obr.playerName??'Player',label:req.label,source:req.source,
-      });
+      };
+      const verification=local&&roomSettings.verifiableRollsEnabled&&obr.roomId&&obr.playerId&&verifierChannel.current
+        ? await new Promise<RollResult['verification']|undefined>(resolve=>{
+          const timeout=setTimeout(()=>{pendingVerification.current.delete(req.requestId);resolve({state:'failed',reason:'Verification service did not respond',rollId:req.requestId,protocol:'NODICE_VERIFIABLE_ROLL_V1',canonicalExpression:req.expression,rollerConnectionId:'',peerConnectionId:''});},15000);
+          pendingVerification.current.set(req.requestId,record=>{clearTimeout(timeout);resolve(record);});
+          verifierChannel.current!.postMessage({type:'roll',roomId:obr.roomId!,playerId:obr.playerId!,requestId:req.requestId,input} satisfies VerificationLocalMessage);
+        }):undefined;
+      const verified=verification?{verification,rng:verification.state==='verified'?await new SeededRng(verification.finalSeed!).expand(MAX_ROLL_STEPS+128):undefined}:undefined;
+      const {record:result}=verified?.verification?.state==='failed'
+        ? {record:{version:1 as const,requestId:req.requestId,expression:req.expression,dialect:req.dialect??'nodice' as Dialect,visibility:v,playerId:input.playerId,playerName:input.playerName,value:'' as const,trace:[],time:Date.now(),error:'Verification failed',verification:verified.verification}}
+        : rollExpression(input,verified?.rng);
+      if(verified?.verification?.state==='verified')result.verification=verified.verification;
       const d=result.dialect;
       if(local&&req.expression===currentInput.current.expression)currentInput.current.dialect=d;
       if(v==='everyone') await OBR.broadcast.sendMessage(RESULT_CHANNEL,result);
@@ -240,17 +268,18 @@ export default function App() {
   };
   const toggle=(section:'distribution'|'recent'|'history')=>setCollapsed(previous=>({...previous,[section]:!previous[section]}));
   const entry=(item:RollResult)=><article className="entry" key={item.requestId}>
-    <div className="entry-meta"><strong>{item.playerName}</strong><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></div>
+    <div className="entry-meta"><strong>{item.playerName}</strong><span className="entry-meta-right">{item.verification&&<span className={`verification-badge ${item.verification.state}`}>{item.verification.state==='verified'?'✓ Verified':'⚠ Verification failed'}</span>}<span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
     <button type="button" className="expression-link" onClick={()=>{setExpression(item.expression);setDialectHint(item.dialect);setSelected(null);}} title="Put this expression back in the input">{item.expression}</button>
     {item.label&&<div className="entry-label">{item.label}</div>}
     <div className="result">{item.error?'ERROR':'RESULT'} <strong>{item.error??display(item.value)}</strong>{item.interpretation&&<span className="interpretation">{item.interpretation}</span>}</div>
+    {item.verification&&<details className="verification-details"><summary>Verification details</summary><pre>{JSON.stringify(item.verification,null,2)}</pre></details>}
     <details><summary>Show work</summary><ol>{(item.steps?.length?item.steps:item.trace).map((step,i)=><li key={i}>{step}</li>)}</ol></details>
   </article>;
   return <main className="no-dice" ref={panelRef}>
     <header className="panel-title" onPointerDown={event=>{if((event.target as HTMLElement).closest('button'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)sendPanel({type:'move',dx,dy});}}} onPointerCancel={()=>{dragStart.current=null;}}>
       <div className="header-brand"><img className="header-icon" src="./icon.svg" alt="" aria-hidden="true"/><h1>No Dice</h1><span className="version">v{RELEASE_VERSION}</span></div><div className="panel-title-actions"><button type="button" className={`header-action fairness-toggle${fairnessRunning?' running':''}`} onClick={toggleFairness} disabled={!expression.trim()} aria-label={fairnessRunning?'Stop fairness calculation':'Calculate fairness'} aria-pressed={fairnessRunning} title={fairnessRunning?'Stop fairness calculation':'Calculate fairness'}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v17M5 6h14M3 20h18M7 6l-4 8h8L7 6Zm10 0-4 8h8l-4-8Z"/></svg></button>{obr.role==='GM'&&<button type="button" className="settings-toggle header-action" aria-label="GM settings" aria-expanded={settingsOpen} title="GM settings" onClick={()=>setSettingsOpen(value=>!value)}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9.7 3.4 10.3 2h3.4l.6 1.4 1.7.7 1.4-.6 2.4 2.4-.6 1.4.7 1.7 1.4.6v3.4l-1.4.6-.7 1.7.6 1.4-2.4 2.4-1.4-.6-1.7.7-.6 1.4h-3.4l-.6-1.4-1.7-.7-1.4.6-2.4-2.4.6-1.4-.7-1.7L2 13.7v-3.4l1.4-.6.7-1.7-.6-1.4 2.4-2.4 1.4.6 1.7-.7Z"/><circle cx="12" cy="12" r="3"/></svg></button>}</div>
     </header>
-    {obr.role==='GM'&&settingsOpen&&<GMSettings settings={roomSettings} onSaved={()=>setSettingsOpen(false)}/>}
+    {obr.role==='GM'&&settingsOpen&&<GMSettings settings={roomSettings} verifiableRollsAvailable={verifiableRollsAvailable} onSaved={()=>setSettingsOpen(false)}/>}
     <section className="probability" aria-label="Probability distribution">
       <button type="button" className="section-heading section-toggle distribution-heading" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.distribution?'▸':'▾'}</span><strong>Distribution</strong></span><span className="distribution-stats" aria-label={chart?`Range ${chart.range?chart.range.join(' to '):chart.entries.length+' outcomes'}, mean ${chart.mean?.toFixed(2)??'unavailable'}, standard deviation ${chart.standardDeviation?.toFixed(2)??'unavailable'}, mode ${display(chart.mode??'—')}`:'Range, mean, standard deviation, and mode unavailable'}><span>{chart?.range?`Range ${chart.range[0]}–${chart.range[1]}`:chart?`${chart.entries.length} outcomes`:'Range —'}</span><span>Mean {chart?.mean?.toFixed(2)??'—'}</span><span>SD {chart?.standardDeviation?.toFixed(2)??'—'}</span><span>Mode {chart?display(chart.mode??'—'):'—'}</span></span><span className="distribution-method">{chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
       {!collapsed.distribution&&<>
@@ -259,18 +288,18 @@ export default function App() {
         {fairnessError&&<div className="input-error" role="alert">{fairnessError}</div>}
       </>}
     </section>
-    <form className="composer" onSubmit={e=>{e.preventDefault();submit();}}>
+    <form className={`composer${roomSettings.verifiableRollsEnabled&&verifiableRollsAvailable?' verifiable-available':''}`} onSubmit={e=>{e.preventDefault();submit();}}>
       <div className="composer-heading"><label htmlFor="expression">Expression</label>{notation&&<NotationPopover expression={expression} notation={notation}/>}</div>
       <div className="expression-row"><input id="expression" ref={inputRef} autoComplete="off" spellCheck={false} value={expression} onChange={e=>{currentInput.current.expression=e.target.value;setExpression(e.target.value);setDialectHint(undefined);setSelected(null);setInputError('');}} placeholder="Enter expression" aria-describedby={inputError||chartError?'input-error':undefined}/><button type="button" className="clear-expression" disabled={!expression} onClick={()=>{currentInput.current.expression='';setExpression('');setDialectHint(undefined);setSelected(null);setInputError('');inputRef.current?.focus();}} aria-label="Clear expression">Clear</button><select aria-label="Roll audience" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">All</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" className="roll-button" disabled={busy||!expression.trim()}>Roll</button></div>
       {inputError&&<div id="input-error" className="input-error" role="alert">{inputError}</div>}
       {!inputError&&chartError&&<div id="input-error" className="input-error" role="status">{chartError}</div>}
     </form>
     <section className="recent-section" aria-label="Most recent result">
-      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.recent?'▸':'▾'}</span><strong>Most Recent Result</strong></span>{collapsed.recent&&recent&&<span className="collapsed-output">{recent.error??display(recent.value)}</span>}</button>
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.recent?'▸':'▾'}</span><strong>Most Recent Result</strong></span>{collapsed.recent&&recent&&<span className="collapsed-output">{recent.verification&&<span className={`verification-preview ${recent.verification.state}`}>{recent.verification.state==='verified'?'✓':'⚠'} </span>}{recent.error??display(recent.value)}</span>}</button>
       {!collapsed.recent&&(recent?entry(recent):<div className="empty">No rolls yet.</div>)}
     </section>
     <section className="ledger" aria-label="Roll history">
-      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.history} onClick={()=>toggle('history')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.history?'▸':'▾'}</span><strong>History</strong></span>{collapsed.history&&<span className="collapsed-history" ref={historyPreviewRef}>{older.map((item,index)=><span className="collapsed-history-result" key={item.requestId} style={{visibility:index<historyPreviewCount?'visible':'hidden'}} aria-hidden={index>=historyPreviewCount}>{item.error??display(item.value)}</span>)}</span>}</button>
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.history} onClick={()=>toggle('history')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.history?'▸':'▾'}</span><strong>History</strong></span>{collapsed.history&&<span className="collapsed-history" ref={historyPreviewRef}>{older.map((item,index)=><span className="collapsed-history-result" key={item.requestId} style={{visibility:index<historyPreviewCount?'visible':'hidden'}} aria-hidden={index>=historyPreviewCount}>{item.verification&&<span className={`verification-preview ${item.verification.state}`}>{item.verification.state==='verified'?'✓':'⚠'} </span>}{item.error??display(item.value)}</span>)}</span>}</button>
       {!collapsed.history&&(older.length?older.map(entry):<div className="empty">No earlier rolls.</div>)}
     </section>
   </main>;

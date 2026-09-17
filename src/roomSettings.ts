@@ -4,9 +4,10 @@ import { REVEAL_LINE_INTERVAL_MS } from './revealLines';
 
 export const ROOM_SETTINGS_KEY = `${EXTENSION_ID}/room-settings`;
 export interface Shortcut { label: string; term: string }
-export interface RoomSettings { calculationSpeedMs: number; shortcuts: Shortcut[] }
+export interface RoomSettings { calculationSpeedMs: number; shortcuts: Shortcut[]; verifiableRollsEnabled: boolean }
 export const DEFAULT_ROOM_SETTINGS: RoomSettings = {
   calculationSpeedMs: REVEAL_LINE_INTERVAL_MS,
+  verifiableRollsEnabled: false,
   shortcuts: DICE_SHORTCUTS.map(({ label, term }) => ({ label, term })),
 };
 
@@ -21,5 +22,5 @@ export function readRoomSettings(metadata: Record<string, unknown>): RoomSetting
     && typeof item.term === 'string' && item.term.trim().length > 0 && item.term.length <= 200)
     ? value.shortcuts.map(item => ({ label: item.label.trim(), term: item.term.trim() }))
     : DEFAULT_ROOM_SETTINGS.shortcuts;
-  return { calculationSpeedMs, shortcuts };
+  return { calculationSpeedMs, shortcuts, verifiableRollsEnabled: value.verifiableRollsEnabled === true };
 }

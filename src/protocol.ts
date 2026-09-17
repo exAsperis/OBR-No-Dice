@@ -7,7 +7,8 @@ export const GM_CHANNEL = `${EXTENSION_ID}/gm-result/v1`;
 export const GM_PUBLIC_KEY = `${EXTENSION_ID}/gm-public-key`;
 export type Visibility = 'everyone' | 'self' | 'gm';
 export interface RollRequest { version:1; requestId:string; expression:string; dialect?:Dialect; visibility?:Visibility; label?:string; source?:string }
-export interface RollResult { version:1; requestId:string; expression:string; dialect:Dialect; visibility:Visibility; playerId:string; playerName:string; value:Value; interpretation?:string; trace:string[]; steps?:string[]; time:number; label?:string; source?:string; error?:string }
+export interface VerificationRecord { state:'verified'|'failed'; reason?:string; rollId:string; protocol:string; canonicalExpression:string; rollerConnectionId:string; peerConnectionId:string; commitments?:Record<string,string>; contributions?:Record<string,string>; finalSeed?:string }
+export interface RollResult { version:1; requestId:string; expression:string; dialect:Dialect; visibility:Visibility; playerId:string; playerName:string; value:Value; interpretation?:string; trace:string[]; steps?:string[]; time:number; label?:string; source?:string; error?:string; verification?:VerificationRecord }
 export const isRequest=(v:unknown):v is RollRequest=>typeof v==='object'&&v!==null&&(v as RollRequest).version===1&&typeof (v as RollRequest).requestId==='string'&&typeof (v as RollRequest).expression==='string';
 export const isResult=(v:unknown):v is RollResult=>typeof v==='object'&&v!==null&&(v as RollResult).version===1&&typeof (v as RollResult).requestId==='string'&&typeof (v as RollResult).expression==='string';
 export interface EncryptedResult { version:1; key:string; iv:string; ciphertext:string }

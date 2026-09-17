@@ -2,12 +2,14 @@ import OBR from '@owlbear-rodeo/sdk';
 import { useEffect, useState } from 'react';
 import { ROOM_SETTINGS_KEY, type RoomSettings, type Shortcut } from './roomSettings';
 
-export function GMSettings({ settings, onSaved }: { settings: RoomSettings; onSaved: () => void }) {
+export function GMSettings({ settings, verifiableRollsAvailable = false, onSaved }: { settings: RoomSettings; verifiableRollsAvailable?: boolean; onSaved: () => void }) {
   const [speed, setSpeed] = useState(String(settings.calculationSpeedMs));
+  const [verifiable, setVerifiable] = useState(settings.verifiableRollsEnabled);
   const [shortcuts, setShortcuts] = useState<Shortcut[]>(settings.shortcuts);
   const [saving, setSaving] = useState(false);
+  const [toggling, setToggling] = useState(false);
   const [error, setError] = useState('');
-  useEffect(() => { setSpeed(String(settings.calculationSpeedMs)); setShortcuts(settings.shortcuts); }, [settings]);
+  useEffect(() => { setSpeed(String(settings.calculationSpeedMs)); setShortcuts(settings.shortcuts); setVerifiable(settings.verifiableRollsEnabled); }, [settings]);
   const update = (index: number, field: keyof Shortcut, value: string) => setShortcuts(previous => previous.map((item, position) => position === index ? { ...item, [field]: value } : item));
   const move = (index: number, offset: number) => setShortcuts(previous => {
     const next = [...previous];
@@ -16,12 +18,23 @@ export function GMSettings({ settings, onSaved }: { settings: RoomSettings; onSa
   });
   const valid = Number.isInteger(Number(speed)) && Number(speed) >= 0 && Number(speed) <= 10000
     && shortcuts.length <= 30 && shortcuts.every(item => item.label.trim().length > 0 && item.label.length <= 32 && item.term.trim().length > 0 && item.term.length <= 200);
+  async function toggleVerifiable(next: boolean) {
+    if (toggling || saving) return;
+    setVerifiable(next); setToggling(true); setError('');
+    try {
+      if (await OBR.player.getRole() !== 'GM') throw new Error('Only the GM can change room settings.');
+      await OBR.room.setMetadata({ [ROOM_SETTINGS_KEY]: { ...settings, verifiableRollsEnabled: next } });
+    } catch (cause) {
+      setVerifiable(settings.verifiableRollsEnabled);
+      setError(cause instanceof Error ? cause.message : 'Could not update Verifiable Rolls.');
+    } finally { setToggling(false); }
+  }
   async function save() {
     if (!valid || saving) return;
     setSaving(true); setError('');
     try {
       if (await OBR.player.getRole() !== 'GM') throw new Error('Only the GM can change room settings.');
-      await OBR.room.setMetadata({ [ROOM_SETTINGS_KEY]: { calculationSpeedMs: Number(speed), shortcuts: shortcuts.map(item => ({ label: item.label.trim(), term: item.term.trim() })) } });
+      await OBR.room.setMetadata({ [ROOM_SETTINGS_KEY]: { calculationSpeedMs: Number(speed), verifiableRollsEnabled: verifiable, shortcuts: shortcuts.map(item => ({ label: item.label.trim(), term: item.term.trim() })) } });
       onSaved();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save settings.'); }
     finally { setSaving(false); }
@@ -30,6 +43,9 @@ export function GMSettings({ settings, onSaved }: { settings: RoomSettings; onSa
     <h2>GM Settings</h2>
     <label className="speed-setting">Calculation speed (ms)<input type="number" min="0" max="10000" step="1" value={speed} onChange={event => setSpeed(event.target.value)} /></label>
     <p>0 shows the result instantly. The speed applies to everyone in this room.</p>
+    <label className="verification-setting"><input type="checkbox" checked={verifiable} disabled={toggling || saving} onChange={event => void toggleVerifiable(event.target.checked)} /> Verifiable Rolls</label>
+    <p>Uses another connected No Dice client to verify each roll when available.</p>
+    {(verifiable||toggling)&&<p className="verification-status" role="status">{toggling?'Updating room setting…':verifiableRollsAvailable?'Ready — a compatible No Dice peer is reachable.':'Waiting for a compatible No Dice peer to respond.'}</p>}
     <h3>Shortcut buttons</h3>
     <div className="shortcut-editor">{shortcuts.map((item, index) => <div className="shortcut-editor-row" key={index}>
       <input aria-label={`Shortcut ${index + 1} name`} maxLength={32} value={item.label} onChange={event => update(index, 'label', event.target.value)} placeholder="Name" />

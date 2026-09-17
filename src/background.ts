@@ -10,11 +10,22 @@ import { PANEL_CHANNEL, PANEL_POPOVER_ID, isPanelMessage, type PanelMessage } fr
 import { clearDraft, fittedPosition, loadHeight, loadPosition, saveHeight, savePosition, type PanelPosition } from './panelLayout';
 import { RELEASE_VERSION } from './version';
 import { fittedRevealPosition, loadRevealPosition, saveRevealPosition } from './revealLayout';
+import { VerificationClient } from './verification';
+import { VERIFY_LOCAL_CHANNEL, type VerificationLocalMessage } from './verificationBridge';
 
 OBR.onReady(async () => {
   const roomId = OBR.room.id;
   const playerId = OBR.player.id;
   const role = await OBR.player.getRole();
+  const verificationChannel=new BroadcastChannel(VERIFY_LOCAL_CHANNEL);
+  const verifier=new VerificationClient(roomId,playerId,role,()=>verificationChannel.postMessage({type:'status',roomId,playerId,available:verifier.available} satisfies VerificationLocalMessage));
+  void verifier.start().catch(()=>{});
+  verificationChannel.onmessage=(event:MessageEvent<VerificationLocalMessage>)=>{
+    const message=event.data;
+    if(!message||message.roomId!==roomId||message.playerId!==playerId)return;
+    if(message.type==='status-request')verificationChannel.postMessage({type:'status',roomId,playerId,available:verifier.available} satisfies VerificationLocalMessage);
+    if(message.type==='roll')void verifier.roll(message.input).then(result=>verificationChannel.postMessage({type:'roll-response',roomId,playerId,requestId:message.requestId,verification:result.verification} satisfies VerificationLocalMessage)).catch(()=>verificationChannel.postMessage({type:'roll-response',roomId,playerId,requestId:message.requestId} satisfies VerificationLocalMessage));
+  };
   const local = new BroadcastChannel(LOCAL_CHANNEL);
   const seen = new Set<string>();
   let current: RollResult | null = null;
