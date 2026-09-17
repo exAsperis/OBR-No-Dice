@@ -11,7 +11,9 @@ import { encryptForGm } from './gmCrypto';
 import { GM_CHANNEL, isRequest, isResult, REQUEST_CHANNEL, RESULT_CHANNEL, type RollRequest, type RollResult, type Visibility } from './protocol';
 import { isLocalMessage, LOCAL_CHANNEL, type LocalMessage } from './revealProtocol';
 import { displayValue, rollExpression } from './rollService';
-import { DICE_SHORTCUTS, insertDiceShortcut } from './shortcuts';
+import { insertDiceShortcut } from './shortcuts';
+import { PANEL_CHANNEL, isPanelMessage, type PanelCommand, type PanelMessage } from './panelProtocol';
+import { DEFAULT_COLLAPSED, loadCollapsed, loadDraft, saveCollapsed, saveDraft } from './panelLayout';
 
 const display=displayValue;
 const MAX_VISIBLE_BARS=200;
@@ -32,6 +34,11 @@ export default function App() {
   const [selected,setSelected]=useState<RollResult|null>(null);
   const [chartRolls,setChartRolls]=useState<Value[]>([]);
   const [busy,setBusy]=useState(false);
+  const [collapsed,setCollapsed]=useState(DEFAULT_COLLAPSED);
+  const [preferencesReady,setPreferencesReady]=useState(false);
+  const panelChannel=useRef<BroadcastChannel|null>(null);
+  const panelRef=useRef<HTMLElement|null>(null);
+  const dragStart=useRef<{x:number;y:number}|null>(null);
   const worker=useRef<Worker|null>(null);
   const fairnessWorker=useRef<Worker|null>(null);
   const fairnessId=useRef(0);
@@ -41,6 +48,56 @@ export default function App() {
   const inputRef=useRef<HTMLInputElement|null>(null);
   const currentInput=useRef({expression,dialect:detectedDialect});
   currentInput.current={expression,dialect:detectedDialect};
+  useEffect(()=>{
+    if(!obr.roomId||!obr.playerId)return;
+    const saved=loadDraft(obr.roomId,obr.playerId);
+    if(saved!==null)setExpression(saved);
+    setCollapsed(loadCollapsed(obr.playerId));
+    setPreferencesReady(true);
+  },[obr.roomId,obr.playerId]);
+  useEffect(()=>{
+    if(!preferencesReady||!obr.roomId||!obr.playerId)return;
+    saveDraft(obr.roomId,obr.playerId,expression);
+  },[expression,preferencesReady,obr.roomId,obr.playerId]);
+  useEffect(()=>{
+    if(!preferencesReady||!obr.playerId)return;
+    saveCollapsed(obr.playerId,collapsed);
+  },[collapsed,preferencesReady,obr.playerId]);
+  useEffect(()=>{
+    if(!preferencesReady||!obr.roomId||!obr.playerId)return;
+    const channel=new BroadcastChannel(PANEL_CHANNEL);
+    panelChannel.current=channel;
+    channel.onmessage=(event:MessageEvent<unknown>)=>{
+      if(!isPanelMessage(event.data)||event.data.roomId!==obr.roomId||event.data.playerId!==obr.playerId)return;
+      if(event.data.type==='apply-shortcut')useShortcut(event.data.term);
+      if(event.data.type==='focus')requestAnimationFrame(()=>inputRef.current?.focus());
+    };
+    channel.postMessage({type:'ready',roomId:obr.roomId,playerId:obr.playerId} satisfies PanelMessage);
+    return ()=>{channel.close();panelChannel.current=null;};
+  // The shortcut handler updates current React state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  },[obr.roomId,obr.playerId,preferencesReady]);
+  useEffect(()=>{
+    if(!preferencesReady||!obr.roomId||!obr.playerId||!panelRef.current)return;
+    const panel=panelRef.current;
+    const roomId=obr.roomId, playerId=obr.playerId;
+    let frame=0;
+    let lastHeight=0;
+    const measure=()=>{
+      cancelAnimationFrame(frame);
+      frame=requestAnimationFrame(()=>{
+        const height=Math.ceil(panel.getBoundingClientRect().height);
+        if(height>0&&Math.abs(height-lastHeight)>=2){
+          lastHeight=height;
+          panelChannel.current?.postMessage({type:'resize',roomId,playerId,height} satisfies PanelMessage);
+        }
+      });
+    };
+    const observer=new ResizeObserver(measure);
+    observer.observe(panel);
+    measure();
+    return ()=>{cancelAnimationFrame(frame);observer.disconnect();};
+  },[preferencesReady,obr.roomId,obr.playerId]);
   const add=(result:RollResult)=>{ if(historyRef.current.some(x=>x.requestId===result.requestId)) return; const next=[...historyRef.current,result].slice(-100); historyRef.current=next; setHistory(next); if(!result.error&&result.expression===currentInput.current.expression&&result.dialect===currentInput.current.dialect)setChartRolls(previous=>[...previous,result.value]); };
   useEffect(()=>{ if(!obr.roomId||!obr.playerId)return; const stored=loadHistory(obr.roomId,obr.playerId); historyRef.current=stored; setHistory(stored); },[obr.roomId,obr.playerId]);
   useEffect(()=>{ if(obr.roomId&&obr.playerId)saveHistory(obr.roomId,obr.playerId,history); },[history,obr.roomId,obr.playerId]);
@@ -112,7 +169,8 @@ export default function App() {
   }
   function submit() { void perform({version:1,requestId:crypto.randomUUID(),expression,dialect:dialectHint,visibility},true); }
   function useShortcut(term:string) {
-    const next=insertDiceShortcut(expression,term);
+    const next=insertDiceShortcut(currentInput.current.expression,term);
+    currentInput.current.expression=next;
     setExpression(next);setDialectHint(undefined);setSelected(null);setInputError('');
     requestAnimationFrame(()=>{inputRef.current?.focus();inputRef.current?.setSelectionRange(next.length,next.length);});
   }
@@ -129,21 +187,46 @@ export default function App() {
   const historicCounts=new Map<string,number>();
   for(const value of chartRolls){const key=JSON.stringify(value);historicCounts.set(key,(historicCounts.get(key)??0)+1);}
   const shownFair=chart?.entries.slice(0,MAX_VISIBLE_BARS).reduce((sum,item)=>sum+(fairCounts.get(JSON.stringify(item.value))??0),0)??0;
-  return <main className="no-dice">
-    <header><div className="header-brand"><img className="header-icon" src="./icon.svg" alt="" aria-hidden="true"/><div><div className="eyebrow">NO DICE <span>· PROBABILITY & RECEIPTS</span></div><h1>Roll ledger</h1></div></div><div className="identity">{obr.playerName??'Player'}<small>{obr.role??''}</small></div></header>
+  const recent=history.at(-1);
+  const older=history.slice(0,-1).reverse();
+  const sendPanel=(message:PanelCommand)=>{
+    if(obr.roomId&&obr.playerId)panelChannel.current?.postMessage({...message,roomId:obr.roomId,playerId:obr.playerId});
+  };
+  const toggle=(section:'distribution'|'recent'|'history')=>setCollapsed(previous=>({...previous,[section]:!previous[section]}));
+  const entry=(item:RollResult)=><article className="entry" key={item.requestId}>
+    <div className="entry-meta"><strong>{item.playerName}</strong><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></div>
+    <button type="button" className="expression-link" onClick={()=>{setExpression(item.expression);setDialectHint(item.dialect);setSelected(null);}} title="Put this expression back in the input">{item.expression}</button>
+    {item.label&&<div className="entry-label">{item.label}</div>}
+    <div className="result">{item.error?'ERROR':'RESULT'} <strong>{item.error??display(item.value)}</strong>{item.interpretation&&<span className="interpretation">{item.interpretation}</span>}</div>
+    <details><summary>Show work</summary><ol>{(item.steps?.length?item.steps:item.trace).map((step,i)=><li key={i}>{step}</li>)}</ol></details>
+  </article>;
+  return <main className="no-dice" ref={panelRef}>
+    <header className="panel-title" onPointerDown={event=>{if((event.target as HTMLElement).closest('button'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)sendPanel({type:'move',dx,dy});}}} onPointerCancel={()=>{dragStart.current=null;}}>
+      <div className="header-brand"><img className="header-icon" src="./icon.svg" alt="" aria-hidden="true"/><div><div className="eyebrow">NO DICE</div><h1>Roll ledger</h1></div></div>
+      <div className="panel-title-actions"><span className="identity">{obr.playerName??'Player'}</span><button type="button" onClick={()=>sendPanel({type:'close'})} aria-label="Close No Dice panel">×</button></div>
+    </header>
     <section className="probability" aria-label="Probability distribution">
-      <div className="section-heading"><strong>Distribution</strong><span>{chart?(chart.exact?'Exact distribution':`≈ Estimated from ${chart.trials?.toLocaleString()} trials`):chartError?'Unavailable':'Enter an expression'}</span></div>
-      {chart&&<><div className="bars" role="img" aria-label="Probability mass chart with roll history and fairness overlay">{chart.entries.slice(0,MAX_VISIBLE_BARS).map((entry,i)=>{const valueKey=JSON.stringify(entry.value),observed=fairCounts.get(valueKey)??0,historic=historicCounts.get(valueKey)??0;const observedRate=fairness?.total?observed/fairness.total:0;return <div className={`bar-cell ${selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(entry.value)?'actual':''}`} key={i} title={`${display(entry.value)}: expected ${(entry.probability*100).toFixed(3)}%; ledger rolls ${historic}; fairness ${fairness?.total?(observedRate*100).toFixed(3)+'% ('+observed+')':'—'}`}><div className="bar-pair"><div className="bar" style={{height:`${Math.max(3,entry.probability/max*100)}%`}}/>{fairness&&<div className="bar observed" style={{height:observed?`${Math.max(3,observedRate/max*100)}%`:'0'}}/>}</div>{historic>0&&<span className="history-mark" aria-label={`${historic} ledger rolls: ${display(entry.value)}`}>{historic}</span>}<small>{display(entry.value)}</small></div>;})}</div><div className="stats"><span>{chart.range?`Range ${chart.range[0]}–${chart.range[1]}`:`${chart.entries.length} outcomes`}</span>{chart.mean!==undefined&&<span>Mean {chart.mean.toFixed(2)}</span>}{chart.standardDeviation!==undefined&&<span>SD {chart.standardDeviation.toFixed(2)}</span>}<span>Mode {display(chart.mode??'—')}</span>{chartRolls.length>0&&<span>{chartRolls.length} ledger rolls</span>}</div><div className="fairness-controls"><button type="button" onClick={toggleFairness} disabled={!expression.trim()} aria-pressed={fairnessRunning}>{fairnessRunning?'Stop':'Calculate fairness'}</button>{fairness&&<span className="fairness-legend"><i aria-hidden="true"/> Observed · {fairness.total.toLocaleString()} rolls{fairness.total>shownFair?' · '+(fairness.total-shownFair).toLocaleString()+' outside visible chart':''}</span>}</div>{fairnessError&&<div className="input-error" role="alert">{fairnessError}</div>}</>}
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><strong>Distribution</strong><span>{collapsed.distribution?'▸':'▾'} {chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
+      {!collapsed.distribution&&<>
+        {chart&&<><div className="bars" role="img" aria-label="Probability mass chart with roll history and fairness overlay">{chart.entries.slice(0,MAX_VISIBLE_BARS).map((item,i)=>{const key=JSON.stringify(item.value),observed=fairCounts.get(key)??0,historic=historicCounts.get(key)??0,rate=fairness?.total?observed/fairness.total:0;return <div className={'bar-cell '+(selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(item.value)?'actual':'')} key={i} title={display(item.value)+': expected '+(item.probability*100).toFixed(3)+'%; ledger rolls '+historic}><div className="bar-pair"><div className="bar" style={{height:Math.max(3,item.probability/max*100)+'%'}}/>{fairness&&<div className="bar observed" style={{height:observed?Math.max(3,rate/max*100)+'%':'0'}}/>}</div>{historic>0&&<span className="history-mark">{historic}</span>}<small>{display(item.value)}</small></div>;})}</div>
+        <div className="stats"><span>{chart.range?'Range '+chart.range[0]+'–'+chart.range[1]:chart.entries.length+' outcomes'}</span>{chart.mean!==undefined&&<span>Mean {chart.mean.toFixed(2)}</span>}{chart.standardDeviation!==undefined&&<span>SD {chart.standardDeviation.toFixed(2)}</span>}<span>Mode {display(chart.mode??'—')}</span>{chartRolls.length>0&&<span>{chartRolls.length} ledger rolls</span>}</div></>}
+        <div className="fairness-controls">{notation&&<details className="notation"><summary>Notation</summary><dl><dt>Original</dt><dd>{expression}</dd><dt>Short</dt><dd>{notation.short}</dd><dt>Readable long</dt><dd>{notation.longReadable}</dd><dt>Expanded</dt><dd>{notation.longExpanded}</dd></dl></details>}<button type="button" onClick={toggleFairness} disabled={!expression.trim()} aria-pressed={fairnessRunning}>{fairnessRunning?'Stop':'Calculate fairness'}</button>{fairness&&<span className="fairness-legend"><i aria-hidden="true"/> Observed · {fairness.total.toLocaleString()} rolls{fairness.total>shownFair?' · '+(fairness.total-shownFair).toLocaleString()+' outside visible chart':''}</span>}</div>
+        {fairnessError&&<div className="input-error" role="alert">{fairnessError}</div>}
+      </>}
     </section>
-    <section className="ledger" aria-label="Roll history">{history.length===0?<div className="empty">No rolls yet. Enter an expression to see its probabilities, then roll.</div>:history.slice().reverse().map(item=><article className="entry" key={item.requestId}><div className="entry-meta"><strong>{item.playerName}</strong><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></div><button className="expression-link" onClick={()=>{setExpression(item.expression);setDialectHint(item.dialect);setSelected(null);}} title="Put this expression back in the input">{item.expression}</button>{item.label&&<div className="entry-label">{item.label}</div>}<div className="result">{item.error?'ERROR':'RESULT'} <strong>{item.error??display(item.value)}</strong>{item.interpretation&&<span className="interpretation">{item.interpretation}</span>}</div><details><summary>Show work</summary><ol>{(item.steps?.length?item.steps:item.trace).map((step,i)=><li key={i}>{step}</li>)}</ol></details></article>)}</section>
     <form className="composer" onSubmit={e=>{e.preventDefault();submit();}}>
-      <div className="composer-heading"><label htmlFor="expression">Expression</label><button type="button" className="clear-expression" disabled={!expression} onClick={()=>{setExpression('');setDialectHint(undefined);setSelected(null);setInputError('');inputRef.current?.focus();}} aria-label="Clear expression">Clear</button></div>
-      <input id="expression" ref={inputRef} autoComplete="off" spellCheck={false} value={expression} onChange={e=>{setExpression(e.target.value);setDialectHint(undefined);setSelected(null);setInputError('');}} placeholder="2d6+4 · H3[4d6] · d{Miss,Hit,Crit}" aria-describedby={inputError||chartError?'input-error':undefined}/>
+      <label htmlFor="expression">Expression</label>
+      <div className="expression-row"><input id="expression" ref={inputRef} autoComplete="off" spellCheck={false} value={expression} onChange={e=>{setExpression(e.target.value);setDialectHint(undefined);setSelected(null);setInputError('');}} placeholder="2d6+4" aria-describedby={inputError||chartError?'input-error':undefined}/><button type="button" className="clear-expression" disabled={!expression} onClick={()=>{setExpression('');setDialectHint(undefined);setSelected(null);setInputError('');inputRef.current?.focus();}} aria-label="Clear expression">Clear</button><select aria-label="Roll audience" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">All</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" className="roll-button" disabled={busy||!expression.trim()}>Roll</button></div>
       {inputError&&<div id="input-error" className="input-error" role="alert">{inputError}</div>}
       {!inputError&&chartError&&<div id="input-error" className="input-error" role="status">{chartError}</div>}
-      {notation&&<details className="notation"><summary>Notation</summary><dl><dt>Original</dt><dd>{expression}</dd><dt>Short</dt><dd>{notation.short}</dd><dt>Readable long</dt><dd>{notation.longReadable}</dd><dt>Expanded</dt><dd>{notation.longExpanded}</dd></dl></details>}
-      <div className="shortcuts" role="group" aria-label="Dice shortcuts">{DICE_SHORTCUTS.map(shortcut=><button type="button" key={shortcut.label} onClick={()=>useShortcut(shortcut.term)} aria-label={`Insert ${shortcut.label} (${shortcut.term})`} title={shortcut.term}>{shortcut.label}</button>)}</div>
-      <div className="controls"><select aria-label="Roll visibility" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">Everyone</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" disabled={busy||!expression.trim()}>Roll ↵</button></div>
     </form>
+    <section className="recent-section" aria-label="Most recent result">
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><strong>Most Recent Result</strong><span>{collapsed.recent?'▸':'▾'}</span></button>
+      {!collapsed.recent&&(recent?entry(recent):<div className="empty">No rolls yet.</div>)}
+    </section>
+    <section className="ledger" aria-label="Roll history">
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.history} onClick={()=>toggle('history')}><strong>History</strong><span>{collapsed.history?'▸':'▾'} {older.length}</span></button>
+      {!collapsed.history&&(older.length?older.map(entry):<div className="empty">No earlier rolls.</div>)}
+    </section>
   </main>;
 }

@@ -6,6 +6,9 @@ import { MAX_API_BROADCAST_BYTES, NO_DICE_API_REQUEST, NO_DICE_API_RESPONSE } fr
 import { createNoDiceApiHandler } from './noDiceApiHandler';
 import { rollExpression } from './rollService';
 import { appendHistory } from './persistence';
+import { PANEL_CHANNEL, PANEL_POPOVER_ID, isPanelMessage, type PanelMessage } from './panelProtocol';
+import { fittedPosition, loadHeight, loadPosition, saveHeight, savePosition, type PanelPosition } from './panelLayout';
+import { RELEASE_VERSION } from './version';
 
 OBR.onReady(async () => {
   const roomId = OBR.room.id;
@@ -18,6 +21,98 @@ OBR.onReady(async () => {
   let opening = false;
   let gmKey: CryptoKey | null = null;
   let rerolling = false;
+  const panelChannel = new BroadcastChannel(PANEL_CHANNEL);
+  let panelOpen = false;
+  let panelOpening = false;
+  let panelPosition: PanelPosition | null = null;
+  const pendingShortcuts: string[] = [];
+  const panelSize = { width: 440, height: 650 };
+  let desiredPanelHeight = loadHeight(playerId);
+  let openedPanelHeight = 0;
+  const panelBounds = async () => {
+    const [width, height] = await Promise.all([
+      OBR.viewport.getWidth().catch(() => window.screen.availWidth),
+      OBR.viewport.getHeight().catch(() => window.screen.availHeight),
+    ]);
+    return { width: width > 0 ? width : window.screen.availWidth, height: height > 0 ? height : window.screen.availHeight };
+  };
+  const openPanel = async (force = false) => {
+    if (panelOpening || (panelOpen && !force)) return;
+    panelOpening = true;
+    try {
+      const bounds = await panelBounds();
+      const size = { width: Math.min(panelSize.width, Math.max(280, bounds.width - 16)), height: Math.min(desiredPanelHeight, panelSize.height, Math.max(180, bounds.height - 16)) };
+      const saved = panelPosition ?? loadPosition(playerId);
+      const position = fittedPosition(saved, bounds, size);
+      panelPosition = position;
+      savePosition(playerId, position);
+      if (force && panelOpen) await OBR.popover.close(PANEL_POPOVER_ID);
+      await OBR.popover.open({
+        id: PANEL_POPOVER_ID,
+        url: new URL(`./panel.html?v=${RELEASE_VERSION}`, window.location.href).toString(),
+        width: size.width, height: size.height,
+        anchorReference: 'POSITION', anchorPosition: position,
+        anchorOrigin: { horizontal: 'LEFT', vertical: 'TOP' },
+        transformOrigin: { horizontal: 'LEFT', vertical: 'TOP' },
+        disableClickAway: true, marginThreshold: 8,
+      });
+      panelOpen = true;
+      openedPanelHeight = size.height;
+    } catch (error) { panelOpen = false; console.error('No Dice panel could not open', error); }
+    finally { panelOpening = false; if (panelOpen) void adjustPanelHeight(); }
+  };
+  const adjustPanelHeight = async () => {
+    if (!panelOpen || panelOpening) return;
+    try {
+      const bounds = await panelBounds();
+      const height = Math.min(desiredPanelHeight, panelSize.height, Math.max(180, bounds.height - 16));
+      if (Math.abs(height - openedPanelHeight) < 2) return;
+      const width = Math.min(panelSize.width, Math.max(280, bounds.width - 16));
+      const fitted = fittedPosition(panelPosition, bounds, { width, height });
+      if (fitted.left !== panelPosition?.left || fitted.top !== panelPosition?.top) {
+        panelPosition = fitted;
+        await openPanel(true);
+      } else {
+        await OBR.popover.setHeight(PANEL_POPOVER_ID, height);
+        openedPanelHeight = height;
+      }
+    } catch (error) { console.error('No Dice panel could not resize', error); }
+  };
+  panelChannel.onmessage = (event: MessageEvent<unknown>) => {
+    if (!isPanelMessage(event.data)) return;
+    const message = event.data;
+    if (message.roomId !== roomId || message.playerId !== playerId) return;
+    if (message.type === 'open') { void openPanel(); return; }
+    if (message.type === 'shortcut') {
+      if (panelOpen && !panelOpening) {
+        panelChannel.postMessage({ type: 'apply-shortcut', roomId, playerId, term: message.term } satisfies PanelMessage);
+      } else {
+        pendingShortcuts.push(message.term);
+        void openPanel();
+      }
+      return;
+    }
+    if (message.type === 'ready') {
+      if (pendingShortcuts.length) {
+        for (const term of pendingShortcuts.splice(0)) panelChannel.postMessage({ type: 'apply-shortcut', roomId, playerId, term } satisfies PanelMessage);
+      } else panelChannel.postMessage({ type: 'focus', roomId, playerId } satisfies PanelMessage);
+      return;
+    }
+    if (message.type === 'close') {
+      panelOpen = false;
+      void OBR.popover.close(PANEL_POPOVER_ID);
+      return;
+    }
+    if (message.type === 'move') {
+      panelPosition = { left: (panelPosition?.left ?? 0) + message.dx, top: (panelPosition?.top ?? 0) + message.dy };
+      void openPanel(true);
+    }
+    if (message.type === 'resize') {
+      desiredPanelHeight = Math.max(180, Math.min(2000, Math.ceil(message.height)));
+      saveHeight(playerId, desiredPanelHeight);
+      void adjustPanelHeight();
+    }
+  };
 
   if (role === 'GM') {
     try { gmKey = await publishGmKey(); }

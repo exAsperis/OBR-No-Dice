@@ -10,6 +10,7 @@ export default defineConfig({
       input: {
         showcase: "index.html",
         extension: "extension.html",
+        panel: "panel.html",
         background: "background.html",
         reveal: "reveal.html",
       },

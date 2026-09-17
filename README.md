@@ -2,7 +2,7 @@
 
 **No fake dice. No fake physics. Just randomness, probability, and the receipts.**
 
-No Dice is an Owlbear Rodeo 2 action popover for dice expressions, arbitrary weighted facets, staged roll traces, and live probability distributions. It uses React, TypeScript, Vite, and `@owlbear-rodeo/sdk` 3.1.
+No Dice is an Owlbear Rodeo 2 extension for dice expressions, arbitrary weighted facets, staged roll traces, and live probability distributions. It uses React, TypeScript, Vite, and `@owlbear-rodeo/sdk` 3.1.
 
 ## Install and develop
 
@@ -13,7 +13,13 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.9.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.10.1.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+
+## Interface
+
+The action popover is a narrow rail beneath the No Dice extension button. Its shortcuts add dice to the current expression and open the separate main panel; **Open** displays the panel without editing the expression. The main panel contains the distribution, a one-line expression composer, the most recent visible result, and older history. Distribution, Most Recent Result, and History can be collapsed independently; those choices are saved locally per Owlbear player. Collapsing sections shrinks the main panel's iframe to its visible content, while longer result and history lists scroll within their sections. The draft expression is saved per player and room.
+
+Drag the panel's title bar to choose a position. Owlbear permits a popover's position to be set when it opens, so the panel moves when the drag ends by reopening at the new position. Its position is saved locally per player and is centered if it would otherwise be off screen after the viewport changes. The separate animated roll reveal remains available even when the main panel is closed. Version 0.10.1 corrects the panel sizing and removes the repeated logo from the shortcut rail. Expression syntax, roll results, and No Dice API v1 remain compatible with 0.9.0.
 
 ## Native expressions
 
@@ -60,7 +66,7 @@ The input automatically accepts common Roll20 `NdM`, arithmetic, parentheses, `k
 
 Valid expressions are parsed 150 ms after typing stops, then evaluated in a Web Worker. Finite distributions are exact while the state space remains under the configured threshold in `src/engine/probability.ts`. Larger or unbounded expressions use an estimate of up to 20,000 trials, stopping after a 1.5-second calculation budget and labeling the actual trial count. The chart marks the latest selected roll outcome. Numeric results use a probability mass chart and show range, mean, population standard deviation, and mode; symbolic results show categories. The main chart displays at most 200 bars at once, enough for every outcome of `d{0..100}`.
 
-The expression composer has shortcuts for Coin (`d{0,1}`), d4, d6, d8, d10, d12, d20, d100, and `%` (`d{0..100}`). A shortcut inserts its term into an empty input or adds it to an existing expression. Clear empties the expression field and returns focus to it. If the final additive term is the same unmodified die, the shortcut increments its quantity instead (`d6` becomes `2d6`).
+The shortcut rail has Coin (`d{0,1}`), d4, d6, d8, d10, d12, d20, d100, and `%` (`d{0..100}`). A shortcut inserts its term into an empty input or adds it to an existing expression. Clear empties the expression field and returns focus to it. If the final additive term is the same unmodified die, the shortcut increments its quantity instead (`d6` becomes `2d6`).
 
 **Calculate fairness** starts repeated local rolls of the current expression in a separate Web Worker. It begins at two rolls per second, doubles its pace about every 0.85 seconds, and caps at 2,048 rolls per second. Teal bars show the accumulating observed frequencies beside the expected distribution, with the sample count beneath the chart. **Stop** preserves the observed bars for inspection. Starting again resets the sample, and editing the expression clears it. These samples do not create ledger entries, broadcast messages, or saved history. If samples produce outcomes outside the 80 visible chart bars, their count is shown below the chart.
 
