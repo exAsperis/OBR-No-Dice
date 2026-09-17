@@ -14,6 +14,20 @@ describe('dice shortcuts',()=>{
     expect(insertDiceShortcut('d6 + ','d8')).toBe('d6 + d8');
     expect(insertDiceShortcut('d6 | 6-:Fail','d8')).toBe('d6 + d8 | 6-:Fail');
   });
+  it('preserves everything after the interpretation pipe',()=>{
+    expect(insertDiceShortcut('d6 | unfinished table','d6')).toBe('2d6 | unfinished table');
+    expect(insertDiceShortcut('d6 +  | unfinished table','d8')).toBe('d6 + d8  | unfinished table');
+    expect(insertDiceShortcut('| 1:Hit','d6')).toBe('d6| 1:Hit');
+  });
+  it('uses an existing operator or one supplied by the shortcut',()=>{
+    for(const operator of ['+','-','*','/']) {
+      expect(insertDiceShortcut(`d6 ${operator} `,'d8')).toBe(`d6 ${operator} d8`);
+      expect(insertDiceShortcut('d6',`${operator}d8`)).toBe(`d6 ${operator} d8`);
+      expect(insertDiceShortcut('d6 + ',`${operator}d8`)).toBe(`d6 ${operator} d8`);
+      expect(insertDiceShortcut('d6 +  | 1:Hit',`${operator}d8`)).toBe(`d6 ${operator} d8  | 1:Hit`);
+    }
+    expect(insertDiceShortcut('d6','-d6')).toBe('d6 - d6');
+  });
   it('increments only the immediate matching die term',()=>{
     expect(insertDiceShortcut('d6','d6')).toBe('2d6');
     expect(insertDiceShortcut('2d6','d6')).toBe('3d6');

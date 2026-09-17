@@ -26,23 +26,34 @@ function dieTerm(node: DiceNode): string {
 
 /** Append a shortcut, or increment the final matching unmodified die term. */
 export function insertDiceShortcut(source: string, term: string): string {
-  const trimmed = source.trimEnd();
-  if (!trimmed) return term;
-  if (['+', '-', '*', '/'].includes(trimmed.at(-1)!)) return `${trimmed} ${term}`;
+  const pipe = source.indexOf('|');
+  const prefix = pipe < 0 ? source : source.slice(0, pipe);
+  const suffix = pipe < 0 ? '' : source.slice(pipe);
+  const trimmed = prefix.trimEnd();
+  const tail = pipe < 0 ? '' : prefix.slice(trimmed.length) + suffix;
+  const shortcut = term.trimStart();
+  const leadingOperator = /^[+\-*/]/.test(shortcut) ? shortcut[0] : null;
+  const body = leadingOperator ? shortcut.slice(1).trimStart() : shortcut;
+  const trailingOperator = /[+\-*/]$/.test(trimmed);
+  if (!trimmed) return `${shortcut}${tail}`;
+  if (leadingOperator) {
+    const left = (trailingOperator ? trimmed.slice(0, -1) : trimmed).trimEnd();
+    return `${left} ${leadingOperator} ${body}${tail}`;
+  }
+  if (trailingOperator) return `${trimmed} ${body}${tail}`;
   try {
-    const ast = parseAuto(source).ast;
+    const ast = parseAuto(prefix).ast;
     const final = lastAdditiveDie(ast);
-    const shortcut = parseAuto(term).ast;
-    if (final && shortcut.kind === 'dice' && final.resolution === 'inferred' && !final.reroll
+    const shortcutAst = parseAuto(body).ast;
+    if (final && shortcutAst.kind === 'dice' && final.resolution === 'inferred' && !final.reroll
         && final.quantity.kind === 'literal' && Number.isInteger(final.quantity.value)
-        && dieTerm(final) === dieTerm(shortcut)) {
+        && dieTerm(final) === dieTerm(shortcutAst)) {
       const replacement = `${final.quantity.value + 1}${dieTerm(final)}`;
-      return source.slice(0, final.span.start) + replacement + source.slice(final.span.end);
+      return prefix.slice(0, final.span.start) + replacement + prefix.slice(final.span.end) + suffix;
     }
-    const end = ast.kind === 'interpret' ? ast.expression.span.end : trimmed.length;
-    return `${source.slice(0, end).trimEnd()} + ${term}${source.slice(end)}`;
+    return `${trimmed} + ${body}${tail}`;
   } catch {
-    return `${trimmed} + ${term}`;
+    return `${trimmed} + ${body}${tail}`;
   }
 }
 
