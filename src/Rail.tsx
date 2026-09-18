@@ -61,7 +61,7 @@ export default function Rail() {
   if (obr.status === 'connecting') return <StatusPanel title="No Dice" message="Connecting…" />;
   if (obr.status === 'error') return <StatusPanel title="No Dice" message={obr.error ?? 'Unavailable'} onRetry={() => void obr.refresh()} />;
   return <main className="rail" aria-label="No Dice shortcuts">
-    <div className="rail-slot"><button className="rail-open" type="button" onClick={() => send({ type: 'toggle' })} title={panelOpen ? 'Close No Dice' : 'Open No Dice'} aria-expanded={panelOpen}>{panelOpen ? 'Close' : 'Open'}</button></div>
+    <div className="rail-slot"><button className="rail-open" type="button" onClick={() => send({ type: 'toggle' })} title={panelOpen ? 'Hide expression panel' : 'Show expression panel'} aria-expanded={panelOpen}>{panelOpen ? 'Hide' : 'Show'}</button></div>
     <div className="rail-shortcuts" role="group" aria-label="Dice shortcuts">
       {shortcuts.map((shortcut, index) => <div className="rail-slot" key={`${index}:${shortcut.label}`}><button type="button" onClick={() => send({ type: 'shortcut', term: shortcut.term, requestId: crypto.randomUUID() })} title={shortcut.term} aria-label={`Insert ${shortcut.label} (${shortcut.term})`}>{shortcut.label}</button></div>)}
     </div>
