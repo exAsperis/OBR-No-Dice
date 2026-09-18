@@ -10,14 +10,18 @@ export class PresentationRecorder {
   readonly stages: string[];
   /** Die responsible for each stage, aligned with stages; blank means a non-roll reduction. */
   readonly stageDice: string[];
+  readonly stageDrawIndices: number[][];
   private root: Node;
-  constructor(root: Node, private enabled = true) { this.root = root.kind === 'interpret' ? root.expression : root; this.stages = enabled ? [formatShort(this.root)] : []; this.stageDice = enabled ? [''] : []; }
+  constructor(root: Node, private enabled = true) { this.root = root.kind === 'interpret' ? root.expression : root; this.stages = enabled ? [formatShort(this.root)] : []; this.stageDice = enabled ? [''] : []; this.stageDrawIndices = enabled ? [[]] : []; }
 
   replace(node: Node, text: string): void { if (this.enabled) this.replacements.set(node, text); }
-  show(rolledDie = ''): void {
+  show(rolledDie = '', drawIndices: number[] = []): void {
     if (!this.enabled) return;
     const next = this.render(this.root);
-    if (next !== this.stages.at(-1)) { this.stages.push(next); this.stageDice.push(rolledDie); }
+    if (next !== this.stages.at(-1)) { this.stages.push(next); this.stageDice.push(rolledDie); this.stageDrawIndices.push(drawIndices); }
+    else if (rolledDie && drawIndices.length && this.stages.length) {
+      this.stageDrawIndices[this.stageDrawIndices.length-1] = drawIndices;
+    }
   }
   isRoot(node: Node): boolean { return node === this.root; }
 

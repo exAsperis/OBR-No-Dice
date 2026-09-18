@@ -55,7 +55,7 @@ OBR.onReady(async () => {
   let panelClosePromise: Promise<void> | null = null;
   let panelPosition: PanelPosition | null = null;
   const pendingShortcuts: Array<{ term: string; requestId: string }> = [];
-  const panelSize = { width: 440, height: 650 };
+  const panelSize = { width: 440 };
   let desiredPanelHeight = loadHeight(playerId);
   let openedPanelHeight = 0;
   const sendPanelState = (open: boolean) => panelChannel.postMessage({ type: 'state', roomId, playerId, open } satisfies PanelMessage);
@@ -88,7 +88,7 @@ OBR.onReady(async () => {
       if (panelClosePromise) await panelClosePromise;
       if (!force) clearDraft(roomId, playerId);
       const bounds = await panelBounds();
-      const size = { width: Math.min(panelSize.width, Math.max(280, bounds.width - 16)), height: Math.min(desiredPanelHeight, panelSize.height, Math.max(180, bounds.height - 16)) };
+      const size = { width: Math.min(panelSize.width, Math.max(280, bounds.width - 16)), height: Math.min(desiredPanelHeight, Math.max(180, bounds.height - 16)) };
       const saved = panelPosition ?? loadPosition(playerId);
       const position = fittedPosition(saved, bounds, size);
       panelPosition = position;
@@ -129,7 +129,7 @@ OBR.onReady(async () => {
     if (!panelOpen || panelOpening) return;
     try {
       const bounds = await panelBounds();
-      const height = Math.min(desiredPanelHeight, panelSize.height, Math.max(180, bounds.height - 16));
+      const height = Math.min(desiredPanelHeight, Math.max(180, bounds.height - 16));
       if (Math.abs(height - openedPanelHeight) < 2) return;
       const width = Math.min(panelSize.width, Math.max(280, bounds.width - 16));
       const fitted = fittedPosition(panelPosition, bounds, { width, height });
@@ -176,7 +176,7 @@ OBR.onReady(async () => {
       void openPanel(true);
     }
     if (message.type === 'resize') {
-      desiredPanelHeight = Math.max(180, Math.min(2000, Math.ceil(message.height)));
+      desiredPanelHeight = Math.max(180, Math.ceil(message.height));
       saveHeight(playerId, desiredPanelHeight);
       void adjustPanelHeight();
     }

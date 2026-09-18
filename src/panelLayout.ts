@@ -32,7 +32,7 @@ export function clearDraft(roomId: string, playerId: string) {
 export function loadHeight(playerId: string): number {
   try {
     const value = Number(localStorage.getItem(heightKey(playerId)));
-    return Number.isFinite(value) && value >= 180 && value <= 2000 ? value : 440;
+    return Number.isFinite(value) && value >= 180 ? value : 440;
   } catch { return 440; }
 }
 export function saveHeight(playerId: string, height: number) {

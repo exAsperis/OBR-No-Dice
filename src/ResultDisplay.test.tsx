@@ -25,4 +25,17 @@ describe('shared result presentation', () => {
     rerender(<ResultDisplay result={{ ...result, verification: { ...result.verification!, state: 'failed' } }} />);
     expect(container.querySelector('.roll-result.verified')).toBeNull();
   });
+  it('shows the rarest result border and streak line without changing an ordinary pill', () => {
+    const moments = [
+      {type:'result-rarity' as const,tier:'unusual' as const,probability:.05,label:'Result'},
+      {type:'result-rarity' as const,tier:'exceptional' as const,probability:.01,label:'Result'},
+      {type:'streak-rarity' as const,tier:'legendary' as const,probability:.0001,label:'Streak'},
+    ];
+    const {container,rerender}=render(<ResultDisplay result={result} moments={moments}/>);
+    expect(container.querySelector('.roll-result-pill.rarity-exceptional')).not.toBeNull();
+    expect(container.querySelector('.roll-result-streak.rarity-legendary')).not.toBeNull();
+    rerender(<ResultDisplay result={result}/>);
+    expect(container.querySelector('.roll-result-pill.rarity-border')).toBeNull();
+    expect(container.querySelector('.roll-result-streak')).toBeNull();
+  });
 });

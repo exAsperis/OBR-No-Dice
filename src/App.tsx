@@ -27,6 +27,7 @@ import { ResultDisplay } from './ResultDisplay';
 import { resizeExpressionEditor } from './expressionEditor';
 import { ledgerWorkRows } from './ledgerWork';
 import { chartBarTooltip, displayedRolls, inclusiveTails } from './rollPresentation';
+import type { RollMoment } from './rollMoments';
 import './statistics.css';
 
 const display=displayValue;
@@ -44,6 +45,10 @@ export default function App() {
   const [sessionStart,setSessionStart]=useState('');
   const [sessionRolls,setSessionRolls]=useState<StoredRoll[]>([]);
   const [sessionRollsLoaded,setSessionRollsLoaded]=useState(false);
+  const [sessionRollsForId,setSessionRollsForId]=useState('');
+  const [momentsByRollId,setMomentsByRollId]=useState<Map<string,RollMoment[]>>(new Map());
+  const momentsWorker=useRef<Worker|null>(null);
+  const momentsSequence=useRef(0);
   const [sessionError,setSessionError]=useState('');
   const [dismissedReminder,setDismissedReminder]=useState('');
   const [chart,setChart]=useState<Distribution|null>(null);
@@ -67,6 +72,9 @@ export default function App() {
   const panelChannel=useRef<BroadcastChannel|null>(null);
   const panelRef=useRef<HTMLElement|null>(null);
   const historyPreviewRef=useRef<HTMLSpanElement|null>(null);
+  const recentCardRef=useRef<HTMLElement|null>(null);
+  const [rollingCardHeight,setRollingCardHeight]=useState<number|null>(null);
+  const [showWorkOpen,setShowWorkOpen]=useState(false);
   const [historyPreviewCount,setHistoryPreviewCount]=useState(Number.POSITIVE_INFINITY);
   const dragStart=useRef<{x:number;y:number}|null>(null);
   const seenShortcutIds=useRef(new Set<string>());
@@ -80,6 +88,7 @@ export default function App() {
   const inputRef=useRef<HTMLTextAreaElement|null>(null);
   const currentInput=useRef({expression,dialect:detectedDialect});
   currentInput.current={expression,dialect:detectedDialect};
+  const rememberRecentCardHeight=()=>{const height=recentCardRef.current?.getBoundingClientRect().height;if(height)setRollingCardHeight(height);};
   useLayoutEffect(()=>{if(inputRef.current)resizeExpressionEditor(inputRef.current);},[expression]);
   useEffect(()=>{
     const editor=inputRef.current;
@@ -137,14 +146,24 @@ export default function App() {
     return()=>{active=false;unsubscribe();};
   },[obr.status,obr.roomId,obr.playerId,obr.role]);
   useEffect(()=>{
-    if(!session||!obr.roomId||!obr.playerId||obr.role!=='GM')return;
+    if(!session||!obr.roomId||!obr.playerId)return;
     let active=true;const room=obr.roomId,player=obr.playerId;
-    setSessionRollsLoaded(false);setSessionRolls([]);
-    const refresh=()=>{void getSessionRolls(room,player,session.id).then(rolls=>{if(active){setSessionRolls(rolls);setSessionRollsLoaded(true);}}).catch(()=>{if(active)setSessionError('Could not load the current session rolls.');});};
+    setSessionRollsLoaded(false);setSessionRollsForId('');setSessionRolls([]);
+    const refresh=()=>{void getSessionRolls(room,player,session.id).then(rolls=>{if(active){setSessionRolls(rolls);setSessionRollsForId(session.id);setSessionRollsLoaded(true);}}).catch(()=>{if(active)setSessionError('Could not load the current session rolls.');});};
     refresh();const channel=new BroadcastChannel(LEDGER_CHANNEL);
     channel.onmessage=event=>{if(event.data?.roomId===room&&event.data?.playerId===player)refresh();};
     return()=>{active=false;channel.close();};
-  },[session?.id,obr.roomId,obr.playerId,obr.role]);
+  },[session?.id,obr.roomId,obr.playerId]);
+  useEffect(()=>{
+    const w=new Worker(new URL('./moments.worker.ts',import.meta.url),{type:'module'});momentsWorker.current=w;
+    w.onmessage=(event:MessageEvent<{id:number;moments:[string,RollMoment[]][]}>)=>{if(event.data.id===momentsSequence.current)setMomentsByRollId(new Map(event.data.moments));};
+    return()=>{w.terminate();momentsWorker.current=null;};
+  },[]);
+  useEffect(()=>{
+    const id=++momentsSequence.current;
+    setMomentsByRollId(new Map());
+    if(sessionRollsLoaded&&sessionRollsForId===session?.id)momentsWorker.current?.postMessage({id,rolls:sessionRolls});
+  },[session?.id,sessionRolls,sessionRollsLoaded,sessionRollsForId]);
   useEffect(()=>{
     if(obr.status!=='ready'||!obr.roomId||!obr.playerId)return;
     const channel=new BroadcastChannel(VERIFY_LOCAL_CHANNEL);verifierChannel.current=channel;
@@ -185,6 +204,7 @@ export default function App() {
     channel.onmessage=(event:MessageEvent<unknown>)=>{
       if(!isLocalMessage(event.data)||event.data.roomId!==obr.roomId||event.data.playerId!==obr.playerId)return;
       if(event.data.type==='reroll-started'){
+        rememberRecentCardHeight();
         setRollingRequestId(event.data.requestId);
         setCollapsed(previous=>({...previous,recent:false}));
         pendingLocalRolls.current.add(event.data.requestId);
@@ -274,7 +294,7 @@ export default function App() {
     }
     finally {setBusy(false);}
   }
-  function submit() { if(busy||!expression.trim())return;const requestId=crypto.randomUUID();setRollingRequestId(requestId);setCollapsed(previous=>({...previous,recent:false}));void perform({version:1,requestId,expression,dialect:dialectHint,visibility},true); }
+  function submit() { if(busy||!expression.trim())return;rememberRecentCardHeight();const requestId=crypto.randomUUID();setRollingRequestId(requestId);setCollapsed(previous=>({...previous,recent:false}));void perform({version:1,requestId,expression,dialect:dialectHint,visibility},true); }
   function useShortcut(term:string,requestId:string) {
     const next=applyDiceShortcutOnce(currentInput.current.expression,term,requestId,seenShortcutIds.current);
     if(next===null)return;
@@ -332,12 +352,12 @@ export default function App() {
   const openNewSession=(start?:number)=>{setSessionName(defaultSessionName());setSessionStart(localDateTime(new Date(start??Date.now()),true));setSessionError('');setSessionDialog('new');};
   const saveSession=async()=>{if(obr.role!=='GM'||!obr.roomId||!obr.playerId||!sessionName.trim()||!sessionDialog||startError||(sessionDialog==='new'&&!sessionRollsLoaded))return;setSessionError('');let created:DiceSession|undefined;try{const next=sessionDialog==='new'?await startSession(obr.roomId,obr.playerId,sessionName,selectedStart,preview.count):await renameSession(obr.roomId,obr.playerId,sessionName);if(sessionDialog==='new')created=next;await OBR.room.setMetadata({[SESSION_KEY]:next});setSession(next);setSessionDialog(null);setSessionRolls([]);}catch(error){if(created&&session)try{await rollbackSessionSplit(obr.roomId,obr.playerId,session,created);}catch{setSessionError('The room update failed and the local session could not be restored. Reopen No Dice to synchronize.');return;}setSessionError(error instanceof Error?error.message:'Could not save the session.');if(session)void getSessionRolls(obr.roomId,obr.playerId,session.id).then(setSessionRolls).catch(()=>{});}};
   const toggle=(section:'distribution'|'recent'|'history')=>setCollapsed(previous=>({...previous,[section]:!previous[section]}));
-  const entry=(item:RollResult)=><article className="entry" key={item.requestId}>
+  const entry=(item:RollResult,isRecent=false)=><article className="entry" key={item.requestId} ref={isRecent?recentCardRef:undefined}>
     <div className="entry-meta"><strong>{item.playerName}</strong><span className="entry-meta-right"><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
     <button type="button" className="expression-link" onClick={()=>{setExpression(item.expression);setDialectHint(item.dialect);setSelected(null);}} title="Put this expression back in the input">{item.expression}</button>
     {item.label&&<div className="entry-label">{item.label}</div>}
-    <details className="work-details"><summary>Show work</summary><div className="work-rows">{ledgerWorkRows(item).map((row,i)=><div className="work-row" key={i}><span className="work-die">{row.die}</span><span className="work-expression">{row.expression}</span></div>)}</div></details>
-    <ResultDisplay result={item}/>
+    <details className="work-details" open={isRecent?showWorkOpen:undefined} onToggle={isRecent?event=>setShowWorkOpen(event.currentTarget.open):undefined}><summary>Show work</summary><div className="work-rows">{ledgerWorkRows(item).map((row,i)=><div className="work-row" key={i}><span className="work-die">{row.die}</span><span className="work-expression">{row.expression}{row.drawIndices?.map(index=>{const draw=item.resolution?.dice[index];const moment=momentsByRollId.get(item.requestId)?.find(moment=>moment.type==='die-rarity'&&moment.drawIndex===index);return draw&&moment?<span key={index} className={`work-draw rarity-${moment.tier}`} title={moment.label}>{String(draw.face)}</span>:null;})}</span></div>)}</div></details>
+    <ResultDisplay result={item} moments={momentsByRollId.get(item.requestId)??[]}/>
   </article>;
   return <main className="no-dice" ref={panelRef}>
     <header className="panel-title" onPointerDown={event=>{if((event.target as HTMLElement).closest('button,a'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)sendPanel({type:'move',dx,dy});}}} onPointerCancel={()=>{dragStart.current=null;}}>
@@ -364,11 +384,11 @@ export default function App() {
     </form>
     <section className="recent-section" aria-label="Most recent result">
       <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.recent?'▸':'▾'}</span><strong>Most Recent Result</strong></span>{collapsed.recent&&recent&&<span className="collapsed-recent-result"><span className="collapsed-recent-content">{recent.verification&&<span className={`verification-preview ${recent.verification.state}`}>{recent.verification.state==='verified'?'✓':'⚠'}</span>}<span className={`collapsed-output${recent.error?' error':''}`}>{recent.error??display(recent.value)}</span><span className="collapsed-recent-player" title={recent.playerName}>({recent.playerName})</span></span></span>}</button>
-      {!collapsed.recent&&(rollingRequestId?<article className="entry rolling-entry" role="status">Rolling . . .</article>:recent?entry(recent):<div className="empty">No rolls yet.</div>)}
+      {!collapsed.recent&&(rollingRequestId?<article className="entry rolling-entry" role="status" style={rollingCardHeight?{height:rollingCardHeight,minHeight:rollingCardHeight}:undefined}>Rolling . . .</article>:recent?entry(recent,true):<div className="empty">No rolls yet.</div>)}
     </section>
     <section className="ledger" aria-label="Roll history">
       <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.history} onClick={()=>toggle('history')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.history?'▸':'▾'}</span><strong>History</strong></span>{collapsed.history&&<span className="collapsed-history" ref={historyPreviewRef}>{older.map((item,index)=><span className="collapsed-history-result" key={item.requestId} style={{visibility:index<historyPreviewCount?'visible':'hidden'}} aria-hidden={index>=historyPreviewCount}>{item.verification&&<span className={`verification-preview ${item.verification.state}`}>{item.verification.state==='verified'?'✓':'⚠'} </span>}{item.error??display(item.value)}</span>)}</span>}</button>
-      {!collapsed.history&&(older.length?older.map(entry):<div className="empty">No earlier rolls.</div>)}
+      {!collapsed.history&&(older.length?older.map(item=>entry(item)):<div className="empty">No earlier rolls.</div>)}
     </section>
   </main>;
 }

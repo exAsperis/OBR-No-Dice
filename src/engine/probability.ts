@@ -85,9 +85,15 @@ function exact(root:Node):PMF{
               frontier=next;if(!frontier.length)break;
             }
           }
+          const resolution=plan.modeFor(node);
+          if(resolution!=='pool'&&[...one.values()].every(item=>typeof item.value==='number')){
+            let sums=only(0);
+            for(let i=0;i<n;i++)sums=combine(sums,one,(a,b)=>scalar(a)+scalar(b));
+            for(const item of sums.values())put(result,item.value,item.p*count.p*side.p);
+            continue;
+          }
           let rolls=only([]);
           for(let i=0;i<n;i++)rolls=combine(rolls,one,(a,b)=>[...members(a),b as Facet]);
-          const resolution=plan.modeFor(node);
           for(const item of rolls.values()){
             const values=members(item.value);let value:Value;
             if(resolution==='pool')value=values;
@@ -124,10 +130,13 @@ function exact(root:Node):PMF{
   };
   return visit(root,'scalar');
 }
-export function distribution(node:Node):Distribution{
+export function distribution(node:Node):Distribution;
+export function distribution(node:Node, exactOnly:true):Distribution|null;
+export function distribution(node:Node, exactOnly=false):Distribution|null{
   let pmf:PMF;let isExact=true;let trials=0;
   try{pmf=exact(node);}catch(error){
     if(error instanceof ExpressionError)throw error;
+    if(exactOnly)return null;
     isExact=false;pmf=new Map();const rng={integer:(n:number)=>Math.floor(Math.random()*n)};
     const deadline=performance.now()+MAX_ESTIMATE_MS;
     while(trials<ESTIMATE_TRIALS){

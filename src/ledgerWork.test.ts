@@ -37,4 +37,9 @@ describe('two-column ledger work', () => {
     delete old.stepDice;
     expect(ledgerWorkRows(old).every(row => row.die === '')).toBe(true);
   });
+  it('carries structured draw indices onto the die reduction stage', () => {
+    const roll=record('2d20',[0,19]);
+    roll.stepDrawIndices=[[],[0,1],[]];
+    expect(ledgerWorkRows(roll)[1].drawIndices).toEqual([0,1]);
+  });
 });

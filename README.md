@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.28.1.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.29.1.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -189,3 +189,7 @@ The Statistics window has a maximize/restore control beside Close. Maximize fill
 Version 0.27.0 adds a GM-only stale-session reminder and a local Session Start picker. A new session can split only the current session; rolls at or after the chosen start move with their original timestamps and contents. The dialog previews the affected rolls before confirmation. When rolls move, the old session ends at its latest remaining roll (or its own start if empty); otherwise it retains the previous creation-time end behavior. Each player applies the shared session boundary to their own visible ledger, so private roll visibility and statistics remain local. This compatible feature release does not change the roll or broadcast protocol formats.
 
 Version 0.28.0 renames the Statistics Query tab to Ledger and adds client-side CSV export for current filtered results or the entire selected session, plus lossless JSON export of that session. Exports include only rolls already visible in the local ledger; no roll data is uploaded. This is a compatible feature release and does not change the broadcast API.
+
+Version 0.29.0 adds Roll Moments for rare individual die faces, numeric final results, and repeated player-expression-result streaks. Moments use exact probabilities only and are calculated from locally visible current-session rolls. This compatible feature adds visual borders, die markers, and streak lines; it does not change roll expressions or broadcast message versions.
+
+Version 0.29.1 keeps the Most Recent Result card height steady while rolling, remembers whether its Show work section is expanded until refresh, and lets the panel grow to fit the recent result up to the viewport height. Expanded History keeps its own scroll limit. This compatible layout fix does not change expressions, roll results, or broadcast messages.

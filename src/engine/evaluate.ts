@@ -14,7 +14,7 @@ export const cryptoRng:Rng={integer(maxExclusive){
 }};
 export type Value=Facet|Facet[];
 export interface DieDraw { die: string; dieIndex: number; face: Facet; kind: 'initial'|'reroll'|'explosion'; nodeSpan?:{start:number;end:number}; facetIndex?:number }
-export interface Evaluation {value:Value;trace:string[];stages:string[];stageDice?:string[];interpretation?:string;dice?:DieDraw[]}
+export interface Evaluation {value:Value;trace:string[];stages:string[];stageDice?:string[];stageDrawIndices?:number[][];interpretation?:string;dice?:DieDraw[]}
 type Context='scalar'|'pool-source';
 /** One budget follows the entire roll, including dynamic parameters and nested facets. */
 export const MAX_ROLL_STEPS=20000;
@@ -57,6 +57,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       return {value,trace:[...left.trace,...right.trace,`${a} ${node.op} ${b} → ${value}`],stages:presentation.stages};
     }
     case 'dice':{
+      const firstDraw=budget.dice.length;
       // Resolve operands left to right before drawing the outer dice.
       const quantity=evaluateNode(node.quantity,rng,'scalar',plan,presentation,showStages,budget,true);const count=positiveInteger(quantity.value,'Dice quantity',100);
       const sides=node.die.kind==='standard-die'?evaluateNode(node.die.sides,rng,'scalar',plan,presentation,showStages,budget,true):undefined;
@@ -123,7 +124,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       }
       trace.push(`${formatShort(node)} → ${show(results)}`);
       const resolution=plan.modeFor(node);
-      presentation.replace(node,show(results));if(showStages&&!operand)presentation.show(formatShort(node));
+      presentation.replace(node,show(results));if(showStages&&!operand)presentation.show(formatShort(node),Array.from({length:budget.dice.length-firstDraw},(_,i)=>firstDraw+i));
       if(resolution==='pool')return {value:results,trace,stages:presentation.stages};
       if(results.every(v=>typeof v==='number')){const value=results.reduce<number>((a,b)=>a+(b as number),0);presentation.replace(node,String(value));if(showStages)presentation.show(operand?formatShort(node):'');return {value,trace:[...trace,`sum → ${value}`],stages:presentation.stages};}
       if(node.resolution==='sum')throw new ExpressionError('Symbolic dice cannot be summed');
@@ -161,5 +162,5 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
     }
   }
 }
-export function evaluate(node:Node,rng:Rng=cryptoRng,recordStages=true):Evaluation{const presentation=new PresentationRecorder(node,recordStages);const budget:RollBudget={steps:0,depth:0,dice:[]};const result=evaluateNode(node,rng,'scalar',resolveSemantics(node),presentation,recordStages,budget);return {...result,stageDice:presentation.stageDice,dice:budget.dice};}
+export function evaluate(node:Node,rng:Rng=cryptoRng,recordStages=true):Evaluation{const presentation=new PresentationRecorder(node,recordStages);const budget:RollBudget={steps:0,depth:0,dice:[]};const result=evaluateNode(node,rng,'scalar',resolveSemantics(node),presentation,recordStages,budget);return {...result,stageDice:presentation.stageDice,stageDrawIndices:presentation.stageDrawIndices,dice:budget.dice};}
 export const roll=evaluate;
