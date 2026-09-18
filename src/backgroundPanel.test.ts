@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { PANEL_CHANNEL, PANEL_POPOVER_ID } from './panelProtocol';
+import { EXTENSION_ID } from './constants';
 import { LOCAL_CHANNEL } from './revealProtocol';
 import { loadRevealPosition } from './revealLayout';
 import { loadDraft, saveDraft } from './panelLayout';
@@ -13,7 +14,7 @@ const state = vi.hoisted(() => ({
 }));
 vi.mock('@owlbear-rodeo/sdk', () => ({ default: {
   onReady: (callback: () => Promise<void>) => { void callback(); },
-  room: { id: 'room' }, player: { id: 'player', getRole: async () => 'PLAYER', getName: async () => 'Player' },
+  room: { id: 'room', getMetadata: async () => ({}) }, player: { id: 'player', getRole: async () => 'PLAYER', getName: async () => 'Player' },
   viewport: { getWidth: async () => state.width, getHeight: async () => state.height },
   popover: { open: async (value: Record<string, unknown>) => { state.opened.push(value); }, close: async (id: string) => { state.closed.push(id); }, setHeight: async (_id: string, height: number) => { state.resized.push(height); } },
   broadcast: { onMessage: () => () => {}, sendMessage: async () => {} },
@@ -73,6 +74,11 @@ describe('background main panel', () => {
     reveal.onmessage?.({ data: { type: 'result', roomId: 'room', playerId: 'player', result: { version: 1, requestId: 'glass2', expression: 'd1', dialect: 'nodice', visibility: 'self', playerId: 'player', playerName: 'Player', value: 1, trace: [], time: 2 } } });
     await vi.waitFor(() => expect(state.opened).toHaveLength(6));
     expect(state.opened[5].anchorPosition).toEqual({ left: 294, top: 124 });
+    reveal.onmessage?.({ data: { type: 'reroll', roomId: 'room', playerId: 'player', requestId: 'glass2' } });
+    await vi.waitFor(() => expect(reveal.sent).toContainEqual(expect.objectContaining({ type: 'reroll-started', roomId: 'room', playerId: 'player' })));
+    const started = reveal.sent.find(message => (message as { type?: string }).type === 'reroll-started') as { requestId: string };
+    expect(started.requestId).not.toBe('glass2');
+    await vi.waitFor(() => expect(reveal.sent).toContainEqual(expect.objectContaining({ type: 'show', result: expect.objectContaining({ requestId: started.requestId, expression: 'd1' }) })));
     send({ type: 'toggle' });
     await vi.waitFor(() => expect(loadDraft('room', 'player')).toBeNull());
     expect(panel.sent).toContainEqual(expect.objectContaining({ type: 'state', open: false }));
@@ -83,6 +89,18 @@ describe('background main panel', () => {
     send({ type: 'close' });
     await vi.waitFor(() => expect(state.closed).toContain(PANEL_POPOVER_ID));
     expect(panel.sent.at(-1)).toEqual(expect.objectContaining({ type: 'state', open: false }));
+    send({ type: 'statistics' });
+    await vi.waitFor(() => expect(state.opened).toHaveLength(8));
+    send({ type: 'statistics-size', maximized: true });
+    await vi.waitFor(() => expect(state.opened).toHaveLength(9));
+    expect(state.opened[8]).toEqual(expect.objectContaining({ width: 700, height: 500, anchorPosition: { left: 0, top: 0 } }));
+    expect(state.opened[8].url).toContain('maximized=1');
+    send({ type: 'statistics-size', maximized: false });
+    await vi.waitFor(() => expect(state.opened).toHaveLength(10));
+    expect(state.opened[9]).toEqual(expect.objectContaining({ width: 620, height: 476, anchorPosition: { left: 40, top: 12 } }));
+    expect(state.opened[9].url).not.toContain('maximized=1');
+    send({ type: 'statistics-close' });
+    await vi.waitFor(() => expect(state.closed).toContain(`${EXTENSION_ID}/statistics`));
     vi.unstubAllGlobals();
   });
 });

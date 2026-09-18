@@ -13,6 +13,9 @@ import { RELEASE_VERSION } from './version';
 import { fittedRevealPosition, loadRevealPosition, saveRevealPosition } from './revealLayout';
 import { VerificationClient } from './verification';
 import { VERIFY_LOCAL_CHANNEL, type VerificationLocalMessage } from './verificationBridge';
+import { readRoomSettings } from './roomSettings';
+import { SeededRng } from './verificationCrypto';
+import { MAX_ROLL_STEPS } from './engine/evaluate';
 
 OBR.onReady(async () => {
   const roomId = OBR.room.id;
@@ -43,6 +46,8 @@ OBR.onReady(async () => {
   let revealResume: { visibleCount: number; highlighted: boolean; dismissDeadline?: number } | null = null;
   const panelChannel = new BroadcastChannel(PANEL_CHANNEL);
   const statisticsId=`${EXTENSION_ID}/statistics`;
+  let statisticsOpen=false;
+  let statisticsOpening=false;
   let panelOpen = false;
   let panelOpening = false;
   let closeAfterOpening = false;
@@ -59,6 +64,21 @@ OBR.onReady(async () => {
       OBR.viewport.getHeight().catch(() => window.screen.availHeight),
     ]);
     return { width: width > 0 ? width : window.screen.availWidth, height: height > 0 ? height : window.screen.availHeight };
+  };
+  const openStatistics = async (maximized: boolean) => {
+    if (statisticsOpening) return;
+    statisticsOpening=true;
+    try {
+      const bounds=await panelBounds();
+      const width=maximized?bounds.width:Math.min(620,Math.max(280,bounds.width-24));
+      const height=maximized?bounds.height:Math.min(700,Math.max(220,bounds.height-24));
+      if(statisticsOpen)await OBR.popover.close(statisticsId);
+      const url=new URL(`./statistics.html?v=${RELEASE_VERSION}`,window.location.href);
+      if(maximized)url.searchParams.set('maximized','1');
+      await OBR.popover.open({id:statisticsId,url:url.toString(),width,height,anchorReference:'POSITION',anchorPosition:maximized?{left:0,top:0}:{left:Math.max(0,Math.round((bounds.width-width)/2)),top:Math.max(0,Math.round((bounds.height-height)/2))},anchorOrigin:{horizontal:'LEFT',vertical:'TOP'},transformOrigin:{horizontal:'LEFT',vertical:'TOP'},hidePaper:true,disableClickAway:true,marginThreshold:0});
+      statisticsOpen=true;
+    } catch(error) { statisticsOpen=false;console.error('No Dice statistics could not open',error); }
+    finally { statisticsOpening=false; }
   };
   const openPanel = async (force = false) => {
     if (panelOpening || (panelOpen && !force)) return;
@@ -126,7 +146,9 @@ OBR.onReady(async () => {
     const message = event.data;
     if (message.roomId !== roomId || message.playerId !== playerId) return;
     if (message.type === 'open') { void openPanel(); return; }
-    if (message.type === 'statistics') { void (async()=>{const bounds=await panelBounds();await OBR.popover.open({id:statisticsId,url:new URL(`./statistics.html?v=${RELEASE_VERSION}`,window.location.href).toString(),width:Math.min(620,Math.max(320,bounds.width-24)),height:Math.min(700,Math.max(300,bounds.height-24)),anchorReference:'POSITION',anchorPosition:{left:Math.max(8,Math.round((bounds.width-Math.min(620,bounds.width-24))/2)),top:Math.max(8,Math.round((bounds.height-Math.min(700,bounds.height-24))/2))},anchorOrigin:{horizontal:'LEFT',vertical:'TOP'},transformOrigin:{horizontal:'LEFT',vertical:'TOP'},hidePaper:true,disableClickAway:true,marginThreshold:8});})().catch(()=>{});return; }
+    if (message.type === 'statistics') { if(!statisticsOpen)void openStatistics(false);return; }
+    if (message.type === 'statistics-size') { if(statisticsOpen)void openStatistics(message.maximized);return; }
+    if (message.type === 'statistics-close') { statisticsOpen=false;void OBR.popover.close(statisticsId);return; }
     if (message.type === 'toggle') { if (panelOpen || panelOpening) void closePanel(); else void openPanel(); return; }
     if (message.type === 'state-request') { sendPanelState(panelOpen && !closeAfterOpening); return; }
     if (message.type === 'shortcut') {
@@ -247,19 +269,28 @@ OBR.onReady(async () => {
     }
     if (message.type === 'reroll' && current?.requestId === message.requestId && !rerolling) {
       const original = current;
+      const requestId = crypto.randomUUID();
       rerolling = true;
+      local.postMessage({ type: 'reroll-started', roomId, playerId, requestId } satisfies LocalMessage);
       void (async () => {
         try {
-          const { record } = rollExpression({
-            requestId: crypto.randomUUID(), expression: original.expression, dialect: original.dialect,
+          const input = {
+            requestId, expression: original.expression, dialect: original.dialect,
             visibility: original.visibility, playerId, playerName: await OBR.player.getName(),
-            label: original.label,
-          });
+            label: original.label, source: original.source,
+          };
+          const enabled = readRoomSettings(await OBR.room.getMetadata()).verifiableRollsEnabled;
+          const verification = enabled ? (await verifier.roll(input)).verification : undefined;
+          const rng = verification?.state === 'verified' ? await new SeededRng(verification.finalSeed!).expand(MAX_ROLL_STEPS + 128) : undefined;
+          const record: RollResult = verification?.state === 'failed'
+            ? { version: 1, ...input, value: '', trace: [], time: Date.now(), error: 'Verification failed', verification }
+            : rollExpression(input, rng).record;
+          if (verification?.state === 'verified') record.verification = verification;
           if (record.visibility === 'everyone') await OBR.broadcast.sendMessage(RESULT_CHANNEL, record);
           if (record.visibility === 'gm' && role !== 'GM') await OBR.broadcast.sendMessage(GM_CHANNEL, await encryptForGm(record));
           present(record);
         } catch (error) {
-          send({ type: 'reroll-error', roomId, playerId, message: error instanceof Error ? error.message : 'Reroll failed' });
+          send({ type: 'reroll-error', roomId, playerId, requestId, message: error instanceof Error ? error.message : 'Reroll failed' });
         } finally { rerolling = false; }
       })();
     }

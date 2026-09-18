@@ -1,27 +1,40 @@
 import OBR from '@owlbear-rodeo/sdk';
-import { StrictMode, useEffect, useMemo, useState } from 'react';
+import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { applyOwlbearTheme } from './theme';
 import { getSessionRolls, LEDGER_CHANNEL, listSessions, migrateHistory, readSharedSession, type DiceSession, type StoredRoll } from './sessionLedger';
 import { analyzeSession, queryOutcomes, type Comparison, type OutcomeMode } from './sessionStats';
 import { SequenceTab } from './SequenceTab';
 import { EXTENSION_ID } from './constants';
+import { PANEL_CHANNEL, type PanelMessage } from './panelProtocol';
 import './styles.css';
 import './statistics.css';
 
 const percentage=(count:number,total:number)=>total?`${(count/total*100).toFixed(1)}%`:'0.0%';
+const viewTransitionKey=`${EXTENSION_ID}/statistics-view-transition`;
+type StatisticsView={selected:string;tab:'overview'|'sequence';player:string;expression:string;mode:OutcomeMode;operator:Comparison;threshold:string};
+const restoredView=(()=>{try{const value=sessionStorage.getItem(viewTransitionKey);sessionStorage.removeItem(viewTransitionKey);return value?JSON.parse(value) as Partial<StatisticsView>:null;}catch{return null;}})();
 
 function Statistics(){
   const [identity,setIdentity]=useState<{room:string;player:string}|null>(null);
   const [sessions,setSessions]=useState<DiceSession[]>([]);
-  const [selected,setSelected]=useState('');
+  const [selected,setSelected]=useState(restoredView?.selected??'');
   const [rolls,setRolls]=useState<StoredRoll[]>([]);
-  const [tab,setTab]=useState<'overview'|'sequence'>('overview');
-  const [player,setPlayer]=useState('');
-  const [expression,setExpression]=useState('');
-  const [mode,setMode]=useState<OutcomeMode>('results');
-  const [operator,setOperator]=useState<Comparison>('<=');
-  const [threshold,setThreshold]=useState('6');
+  const [tab,setTab]=useState<'overview'|'sequence'>(restoredView?.tab??'overview');
+  const [player,setPlayer]=useState(restoredView?.player??'');
+  const [expression,setExpression]=useState(restoredView?.expression??'');
+  const [mode,setMode]=useState<OutcomeMode>(restoredView?.mode??'results');
+  const [operator,setOperator]=useState<Comparison>(restoredView?.operator??'<=');
+  const [threshold,setThreshold]=useState(restoredView?.threshold??'6');
+  const [maximized]=useState(new URLSearchParams(window.location.search).get('maximized')==='1');
+  const controls=useRef<BroadcastChannel|null>(null);
+  useEffect(()=>{if(!identity)return;const channel=new BroadcastChannel(PANEL_CHANNEL);controls.current=channel;return()=>{channel.close();controls.current=null;};},[identity]);
+  const resize=()=>{
+    if(!identity)return;
+    try{sessionStorage.setItem(viewTransitionKey,JSON.stringify({selected,tab,player,expression,mode,operator,threshold} satisfies StatisticsView));}catch{/* Filters reset if storage is unavailable. */}
+    controls.current?.postMessage({type:'statistics-size',roomId:identity.room,playerId:identity.player,maximized:!maximized} satisfies PanelMessage);
+  };
+  const close=()=>{if(identity)controls.current?.postMessage({type:'statistics-close',roomId:identity.room,playerId:identity.player} satisfies PanelMessage);};
   useEffect(()=>{
     let active=true,offTheme:(()=>void)|undefined,offMetadata:(()=>void)|undefined;
     OBR.onReady(async()=>{
@@ -41,8 +54,8 @@ function Statistics(){
   const selectedSession=sessions.find(item=>item.id===selected);
   const numeric=threshold.trim()!==''&&Number.isFinite(Number(threshold))?Number(threshold):null;
   const matches=numeric===null?0:queryOutcomes(stats.distribution,operator,numeric);
-  return <main className="statistics-window">
-    <header><div><h1>Session Statistics</h1><p>Based on rolls visible to you.</p></div><button type="button" aria-label="Close statistics" onClick={()=>void OBR.popover.close(`${EXTENSION_ID}/statistics`)}>×</button></header>
+  return <main className={`statistics-window${maximized?' maximized':''}`}>
+    <header><div><h1>Session Statistics</h1><p>Based on rolls visible to you.</p></div><div className="statistics-header-actions"><button type="button" aria-label={maximized?'Restore statistics window':'Maximize statistics window'} title={maximized?'Restore':'Maximize'} aria-pressed={maximized} disabled={!identity} onClick={resize}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{maximized?<><rect x="5" y="7" width="13" height="13" rx="1"/><path d="M8 7V4h12v12h-2"/></>:<rect x="4" y="4" width="16" height="16" rx="1"/>}</svg></button><button type="button" aria-label="Close statistics" title="Close" disabled={!identity} onClick={close}>×</button></div></header>
     <div className="statistics-content">
       <label className="session-select">Session <select value={selected} onChange={event=>{setSelected(event.target.value);setPlayer('');setExpression('');}}>{sessions.map(item=><option key={item.id} value={item.id}>{item.endedAt?item.name:`Current Session · ${item.name}`}</option>)}</select></label>
       <h2>{selectedSession?.name??'Current Session'}</h2>

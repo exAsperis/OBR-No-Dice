@@ -10,8 +10,9 @@ export type LocalMessage =
   | { type: 'ready'; roomId: string; playerId: string }
   | { type: 'dismiss'; roomId: string; playerId: string }
   | { type: 'reroll'; roomId: string; playerId: string; requestId: string }
+  | { type: 'reroll-started'; roomId: string; playerId: string; requestId: string }
   | { type: 'move'; roomId: string; playerId: string; dx: number; dy: number; visibleCount: number; highlighted: boolean; dismissDeadline?: number }
-  | { type: 'reroll-error'; roomId: string; playerId: string; message: string };
+  | { type: 'reroll-error'; roomId: string; playerId: string; requestId: string; message: string };
 
 export const isLocalMessage = (value: unknown): value is LocalMessage => {
   if (!value || typeof value !== 'object') return false;

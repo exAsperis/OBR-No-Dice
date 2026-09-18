@@ -24,6 +24,7 @@ import { MAX_ROLL_STEPS } from './engine/evaluate';
 import { ResultDisplay } from './ResultDisplay';
 import { resizeExpressionEditor } from './expressionEditor';
 import { ledgerWorkRows } from './ledgerWork';
+import { chartBarTooltip, displayedRolls } from './rollPresentation';
 import './statistics.css';
 
 const display=displayValue;
@@ -48,6 +49,7 @@ export default function App() {
   const [selected,setSelected]=useState<RollResult|null>(null);
   const [chartRolls,setChartRolls]=useState<Value[]>([]);
   const [busy,setBusy]=useState(false);
+  const [rollingRequestId,setRollingRequestId]=useState<string|null>(null);
   const [roomSettings,setRoomSettings]=useState<RoomSettings>(DEFAULT_ROOM_SETTINGS);
   const [verifiableRollsAvailable,setVerifiableRollsAvailable]=useState(false);
   const verifierChannel=useRef<BroadcastChannel|null>(null);
@@ -165,10 +167,24 @@ export default function App() {
     if(!obr.roomId||!obr.playerId)return;
     const channel=new BroadcastChannel(LOCAL_CHANNEL);revealChannel.current=channel;
     channel.onmessage=(event:MessageEvent<unknown>)=>{
-      if(!isLocalMessage(event.data)||event.data.type!=='revealed'||!isResult(event.data.result))return;
-      if(event.data.roomId===obr.roomId&&event.data.playerId===obr.playerId){
-        add(event.data.result);
-        if(pendingLocalRolls.current.delete(event.data.result.requestId)){setSelected(event.data.result);setInputError('');}
+      if(!isLocalMessage(event.data)||event.data.roomId!==obr.roomId||event.data.playerId!==obr.playerId)return;
+      if(event.data.type==='reroll-started'){
+        setRollingRequestId(event.data.requestId);
+        setCollapsed(previous=>({...previous,recent:false}));
+        pendingLocalRolls.current.add(event.data.requestId);
+        return;
+      }
+      if(event.data.type==='reroll-error'){
+        const requestId=event.data.requestId;
+        setRollingRequestId(current=>current===requestId?null:current);
+        pendingLocalRolls.current.delete(requestId);
+        return;
+      }
+      if(event.data.type==='revealed'&&isResult(event.data.result)){
+        const result=event.data.result;
+        add(result);
+        setRollingRequestId(current=>current===result.requestId?null:current);
+        if(pendingLocalRolls.current.delete(result.requestId)){setSelected(result);setInputError('');}
       }
     };
     return ()=>{channel.close();revealChannel.current=null;};
@@ -234,7 +250,7 @@ export default function App() {
     } catch(error) {
       pendingLocalRolls.current.delete(req.requestId);
       const message=error instanceof Error?error.message:'Roll failed';
-      if(local)setInputError(message);
+      if(local){setInputError(message);setRollingRequestId(current=>current===req.requestId?null:current);}
       else if((req.visibility??'everyone')==='everyone') {
         const failed:RollResult={version:1,requestId:req.requestId,expression:req.expression,dialect:req.dialect??'nodice',visibility:'everyone',playerId:obr.playerId??'',playerName:obr.playerName??'Player',value:'',trace:[],time:Date.now(),error:message,source:req.source,label:req.label};
         await OBR.broadcast.sendMessage(RESULT_CHANNEL,failed).catch(()=>{});
@@ -242,7 +258,7 @@ export default function App() {
     }
     finally {setBusy(false);}
   }
-  function submit() { void perform({version:1,requestId:crypto.randomUUID(),expression,dialect:dialectHint,visibility},true); }
+  function submit() { if(busy||!expression.trim())return;const requestId=crypto.randomUUID();setRollingRequestId(requestId);setCollapsed(previous=>({...previous,recent:false}));void perform({version:1,requestId,expression,dialect:dialectHint,visibility},true); }
   function useShortcut(term:string,requestId:string) {
     const next=applyDiceShortcutOnce(currentInput.current.expression,term,requestId,seenShortcutIds.current);
     if(next===null)return;
@@ -284,8 +300,7 @@ export default function App() {
   const historicCounts=new Map<string,number>();
   for(const value of chartRolls){const key=JSON.stringify(value);historicCounts.set(key,(historicCounts.get(key)??0)+1);}
   const shownFair=chart?.entries.slice(0,MAX_VISIBLE_BARS).reduce((sum,item)=>sum+(fairCounts.get(JSON.stringify(item.value))??0),0)??0;
-  const recent=history.at(-1);
-  const older=history.slice(0,-1).reverse();
+  const {recent,older}=displayedRolls(history,rollingRequestId!==null);
   const sendPanel=(message:PanelCommand)=>{
     if(obr.roomId&&obr.playerId)panelChannel.current?.postMessage({...message,roomId:obr.roomId,playerId:obr.playerId});
   };
@@ -309,7 +324,7 @@ export default function App() {
     <section className="probability" aria-label="Probability distribution">
       <button type="button" className="section-heading section-toggle distribution-heading" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.distribution?'▸':'▾'}</span><strong>Distribution</strong></span><span className="distribution-stats" aria-label={chart?`Range ${chart.range?chart.range.join(' to '):chart.entries.length+' outcomes'}, mean ${chart.mean?.toFixed(2)??'unavailable'}, standard deviation ${chart.standardDeviation?.toFixed(2)??'unavailable'}, mode ${display(chart.mode??'—')}`:'Range, mean, standard deviation, and mode unavailable'}><span>{chart?.range?`Range ${chart.range[0]}–${chart.range[1]}`:chart?`${chart.entries.length} outcomes`:'Range —'}</span><span>Mean {chart?.mean?.toFixed(2)??'—'}</span><span>SD {chart?.standardDeviation?.toFixed(2)??'—'}</span><span>Mode {chart?display(chart.mode??'—'):'—'}</span></span><span className="distribution-method">{chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
       {!collapsed.distribution&&<>
-        <div className={`bars${chart ? '' : ' distribution-placeholder'}`} role={chart ? 'img' : undefined} aria-label={chart ? 'Probability mass chart with roll history and fairness overlay' : undefined} aria-hidden={chart ? undefined : true}>{chart?.entries.slice(0,MAX_VISIBLE_BARS).map((item,i)=>{const key=JSON.stringify(item.value),observed=fairCounts.get(key)??0,historic=historicCounts.get(key)??0,rate=fairness?.total?observed/fairness.total:0;const actual=selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(item.value);return <div className={`bar-cell${actual?' actual':''}${actual&&selected.verification?.state==='verified'?' verified':''}`} key={i} title={display(item.value)+': expected '+(item.probability*100).toFixed(3)+'%; ledger rolls '+historic}><div className="bar-pair"><div className="bar" style={{height:Math.max(3,item.probability/max*100)+'%'}}/>{fairness&&<div className="bar observed" style={{height:observed?Math.max(3,rate/max*100)+'%':'0'}}/>}</div>{historic>0&&<span className="history-mark">{historic}</span>}<small>{display(item.value)}</small></div>;})}</div>
+        <div className={`bars${chart ? '' : ' distribution-placeholder'}`} role={chart ? 'img' : undefined} aria-label={chart ? 'Probability mass chart with roll history and fairness overlay' : undefined} aria-hidden={chart ? undefined : true}>{chart?.entries.slice(0,MAX_VISIBLE_BARS).map((item,i)=>{const key=JSON.stringify(item.value),observed=fairCounts.get(key)??0,historic=historicCounts.get(key)??0,rate=fairness?.total?observed/fairness.total:0;const actual=selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(item.value);return <div className={`bar-cell${actual?' actual':''}${actual&&selected.verification?.state==='verified'?' verified':''}`} key={i} title={chartBarTooltip(display(item.value),item.probability,historic,fairnessRunning||fairness?rate:undefined)}><div className="bar-pair"><div className="bar" style={{height:Math.max(3,item.probability/max*100)+'%'}}/>{fairness&&<div className="bar observed" style={{height:observed?Math.max(3,rate/max*100)+'%':'0'}}/>}</div>{historic>0&&<span className="history-mark">{historic}</span>}<small>{display(item.value)}</small></div>;})}</div>
         {fairness&&<div className="fairness-controls"><span className="fairness-legend"><i aria-hidden="true"/> Observed · {fairness.total.toLocaleString()} rolls{fairness.total>shownFair?' · '+(fairness.total-shownFair).toLocaleString()+' outside visible chart':''}</span><button type="button" className="fairness-reset" onClick={resetFairness} aria-label="Reset observed fairness results">Reset</button></div>}
         {fairnessError&&<div className="input-error" role="alert">{fairnessError}</div>}
       </>}
@@ -321,8 +336,8 @@ export default function App() {
       {!inputError&&chartError&&<div id="input-error" className="input-error" role="status">{chartError}</div>}
     </form>
     <section className="recent-section" aria-label="Most recent result">
-      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.recent?'▸':'▾'}</span><strong>Most Recent Result</strong></span>{collapsed.recent&&recent&&<span className="collapsed-recent-result"><span className="collapsed-recent-content">{recent.verification&&<span className={`verification-preview ${recent.verification.state}`}>{recent.verification.state==='verified'?'✓':'⚠'}</span>}<span className={`collapsed-output${recent.error?' error':''}`}>{recent.error??display(recent.value)}</span></span></span>}</button>
-      {!collapsed.recent&&(recent?entry(recent):<div className="empty">No rolls yet.</div>)}
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.recent?'▸':'▾'}</span><strong>Most Recent Result</strong></span>{collapsed.recent&&recent&&<span className="collapsed-recent-result"><span className="collapsed-recent-content">{recent.verification&&<span className={`verification-preview ${recent.verification.state}`}>{recent.verification.state==='verified'?'✓':'⚠'}</span>}<span className={`collapsed-output${recent.error?' error':''}`}>{recent.error??display(recent.value)}</span><span className="collapsed-recent-player" title={recent.playerName}>({recent.playerName})</span></span></span>}</button>
+      {!collapsed.recent&&(rollingRequestId?<article className="entry rolling-entry" role="status">Rolling . . .</article>:recent?entry(recent):<div className="empty">No rolls yet.</div>)}
     </section>
     <section className="ledger" aria-label="Roll history">
       <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.history} onClick={()=>toggle('history')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.history?'▸':'▾'}</span><strong>History</strong></span>{collapsed.history&&<span className="collapsed-history" ref={historyPreviewRef}>{older.map((item,index)=><span className="collapsed-history-result" key={item.requestId} style={{visibility:index<historyPreviewCount?'visible':'hidden'}} aria-hidden={index>=historyPreviewCount}>{item.verification&&<span className={`verification-preview ${item.verification.state}`}>{item.verification.state==='verified'?'✓':'⚠'} </span>}{item.error??display(item.value)}</span>)}</span>}</button>

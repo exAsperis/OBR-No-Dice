@@ -38,12 +38,16 @@ function RevealDistribution({ distribution, result, highlighted }: { distributio
       surface.style.width = `${width}px`;
       const context = surface.getContext('2d');
       if (!context) return;
+      const colors = getComputedStyle(container);
+      const normalColor = colors.getPropertyValue('--accent').trim() || '#a68bfa';
+      const highlightColor = colors.getPropertyValue(result.verification?.state === 'verified' ? '--verified-gold' : '--result-blue').trim()
+        || (result.verification?.state === 'verified' ? '#b88722' : '#4da3ff');
       const max = Math.max(...entries.map(entry => entry.probability));
       const barWidth = width / entries.length;
       for (let index = 0; index < entries.length; index++) {
         const entry = entries[index];
         const barHeight = Math.max(1, Math.round(entry.probability / max * height));
-        context.fillStyle = highlighted && JSON.stringify(entry.value) === JSON.stringify(result.value) ? '#f3ac41' : '#a68bfa';
+        context.fillStyle = highlighted && JSON.stringify(entry.value) === JSON.stringify(result.value) ? highlightColor : normalColor;
         const left = Math.round(index * barWidth), right = Math.round((index + 1) * barWidth);
         const top = height - barHeight;
         const radius = Math.min(2, (right - left) / 2, barHeight / 2);
@@ -64,8 +68,10 @@ function RevealDistribution({ distribution, result, highlighted }: { distributio
     draw();
     const observer = new ResizeObserver(draw);
     observer.observe(container);
-    return () => observer.disconnect();
-  }, [entries, result.value, highlighted]);
+    const themeObserver = new MutationObserver(draw);
+    themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'style'] });
+    return () => { observer.disconnect(); themeObserver.disconnect(); };
+  }, [entries, result.value, result.verification?.state, highlighted]);
   return <div className="reveal-distribution" ref={scroller} role="img" aria-label={`${distribution.exact ? 'Exact' : 'Estimated'} distribution for ${result.expression}; ${highlighted ? `rolled ${Array.isArray(result.value) ? result.value.join(', ') : result.value}` : 'result pending'}`}><canvas ref={canvas} aria-hidden="true" /></div>;
 }
 
