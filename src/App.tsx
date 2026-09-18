@@ -6,7 +6,9 @@ import type { Dialect } from './engine/ast';
 import type { Distribution } from './engine/probability';
 import type { FairnessSnapshot } from './engine/fairness';
 import { useOwlbear } from './hooks/useOwlbear';
-import { defaultSessionName, ensureSession, getRecentRolls, migrateHistory, readSharedSession, renameSession, SESSION_KEY, startSession, type DiceSession } from './sessionLedger';
+import { defaultSessionName, ensureSession, getRecentRolls, getSessionRolls, localDateTime, migrationPreview, migrateHistory, parseLocalDateTime, readSharedSession, renameSession, rollbackSessionSplit, SESSION_KEY, startSession, LEDGER_CHANNEL, type DiceSession, type StoredRoll } from './sessionLedger';
+import { detectStaleSession, reminderKey } from './staleSession';
+import { EXTENSION_ID } from './constants';
 import { encryptForGm } from './gmCrypto';
 import { GM_CHANNEL, isRequest, isResult, REQUEST_CHANNEL, RESULT_CHANNEL, type RollRequest, type RollResult, type Visibility } from './protocol';
 import { isLocalMessage, LOCAL_CHANNEL, type LocalMessage } from './revealProtocol';
@@ -39,6 +41,11 @@ export default function App() {
   const [session,setSession]=useState<DiceSession|null>(null);
   const [sessionDialog,setSessionDialog]=useState<'new'|'rename'|null>(null);
   const [sessionName,setSessionName]=useState('');
+  const [sessionStart,setSessionStart]=useState('');
+  const [sessionRolls,setSessionRolls]=useState<StoredRoll[]>([]);
+  const [sessionRollsLoaded,setSessionRollsLoaded]=useState(false);
+  const [sessionError,setSessionError]=useState('');
+  const [dismissedReminder,setDismissedReminder]=useState('');
   const [chart,setChart]=useState<Distribution|null>(null);
   const [chartError,setChartError]=useState('');
   const [fairness,setFairness]=useState<FairnessSnapshot|null>(null);
@@ -129,6 +136,15 @@ export default function App() {
     void OBR.room.getMetadata().then(async metadata=>{if(!active)return;const shared=readSharedSession(metadata);await migrateHistory(room,player,shared);if(active)setSession(await ensureSession(room,player,shared));}).catch(async()=>{if(active)setSession(await ensureSession(room,player));});
     return()=>{active=false;unsubscribe();};
   },[obr.status,obr.roomId,obr.playerId,obr.role]);
+  useEffect(()=>{
+    if(!session||!obr.roomId||!obr.playerId||obr.role!=='GM')return;
+    let active=true;const room=obr.roomId,player=obr.playerId;
+    setSessionRollsLoaded(false);setSessionRolls([]);
+    const refresh=()=>{void getSessionRolls(room,player,session.id).then(rolls=>{if(active){setSessionRolls(rolls);setSessionRollsLoaded(true);}}).catch(()=>{if(active)setSessionError('Could not load the current session rolls.');});};
+    refresh();const channel=new BroadcastChannel(LEDGER_CHANNEL);
+    channel.onmessage=event=>{if(event.data?.roomId===room&&event.data?.playerId===player)refresh();};
+    return()=>{active=false;channel.close();};
+  },[session?.id,obr.roomId,obr.playerId,obr.role]);
   useEffect(()=>{
     if(obr.status!=='ready'||!obr.roomId||!obr.playerId)return;
     const channel=new BroadcastChannel(VERIFY_LOCAL_CHANNEL);verifierChannel.current=channel;
@@ -304,7 +320,16 @@ export default function App() {
   const sendPanel=(message:PanelCommand)=>{
     if(obr.roomId&&obr.playerId)panelChannel.current?.postMessage({...message,roomId:obr.roomId,playerId:obr.playerId});
   };
-  const saveSession=async()=>{if(obr.role!=='GM'||!obr.roomId||!obr.playerId||!sessionName.trim()||!sessionDialog)return;const next=sessionDialog==='new'?await startSession(obr.roomId,obr.playerId,sessionName):await renameSession(obr.roomId,obr.playerId,sessionName);await OBR.room.setMetadata({[SESSION_KEY]:next});setSession(next);setSessionDialog(null);};
+  const stale=detectStaleSession(session,sessionRolls,obr.role==='GM');
+  const suppressionKey=`${EXTENSION_ID}/stale-dismissed/${obr.roomId??''}/${obr.playerId??''}`;
+  const isSuppressed=(key:string)=>{try{return (JSON.parse(sessionStorage.getItem(suppressionKey)??'[]') as string[]).includes(key);}catch{return false;}};
+  const showReminder=stale&&reminderKey(stale)!==dismissedReminder&&!isSuppressed(reminderKey(stale));
+  const continueSession=()=>{if(!stale)return;const key=reminderKey(stale);setDismissedReminder(key);try{const previous=JSON.parse(sessionStorage.getItem(suppressionKey)??'[]') as string[];sessionStorage.setItem(suppressionKey,JSON.stringify([...previous.filter(item=>item!==key),key].slice(-20)));}catch{/* In-memory dismissal still works. */}};
+  const selectedStart=parseLocalDateTime(sessionStart);
+  const startError=sessionDialog==='new'&&session&&(!Number.isFinite(selectedStart)?'Enter a valid local Session Start time.':selectedStart<session.startedAt?'Session Start cannot be earlier than the beginning of the current session.':'');
+  const preview=migrationPreview(sessionRolls,selectedStart);
+  const openNewSession=(start?:number)=>{setSessionName(defaultSessionName());setSessionStart(localDateTime(new Date(start??Date.now()),true));setSessionError('');setSessionDialog('new');};
+  const saveSession=async()=>{if(obr.role!=='GM'||!obr.roomId||!obr.playerId||!sessionName.trim()||!sessionDialog||startError||(sessionDialog==='new'&&!sessionRollsLoaded))return;setSessionError('');let created:DiceSession|undefined;try{const next=sessionDialog==='new'?await startSession(obr.roomId,obr.playerId,sessionName,selectedStart,preview.count):await renameSession(obr.roomId,obr.playerId,sessionName);if(sessionDialog==='new')created=next;await OBR.room.setMetadata({[SESSION_KEY]:next});setSession(next);setSessionDialog(null);setSessionRolls([]);}catch(error){if(created&&session)try{await rollbackSessionSplit(obr.roomId,obr.playerId,session,created);}catch{setSessionError('The room update failed and the local session could not be restored. Reopen No Dice to synchronize.');return;}setSessionError(error instanceof Error?error.message:'Could not save the session.');if(session)void getSessionRolls(obr.roomId,obr.playerId,session.id).then(setSessionRolls).catch(()=>{});}};
   const toggle=(section:'distribution'|'recent'|'history')=>setCollapsed(previous=>({...previous,[section]:!previous[section]}));
   const entry=(item:RollResult)=><article className="entry" key={item.requestId}>
     <div className="entry-meta"><strong>{item.playerName}</strong><span className="entry-meta-right"><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
@@ -319,8 +344,9 @@ export default function App() {
       <div className="panel-title-actions secondary-actions"><a className="header-action help-button" aria-label="No Dice help" title="No Dice help" href="https://no-dice.ex-asperis.com" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9.2 9a3 3 0 1 1 5.2 2c-1.5 1.2-2.4 1.7-2.4 3"/><circle cx="12" cy="17.5" r="1" fill="currentColor" stroke="none"/></svg></a><button type="button" className="header-action panel-close" aria-label="Close panel" title="Close panel" onClick={()=>sendPanel({type:'close'})}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     </header>
     {obr.role==='GM'&&settingsOpen&&<GMSettings settings={roomSettings} verifiableRollsAvailable={verifiableRollsAvailable}/>}
-    <section className="session-strip"><span>Session: <strong>{session?.name??'Loading…'}</strong></span><div><button type="button" onClick={()=>sendPanel({type:'statistics'})}>Statistics</button>{obr.role==='GM'&&<><button type="button" onClick={()=>{setSessionName(session?.name??'');setSessionDialog('rename');}}>Rename</button><button type="button" onClick={()=>{setSessionName(defaultSessionName());setSessionDialog('new');}}>New Session</button></>}</div></section>
-    {sessionDialog&&<div className="session-dialog-backdrop"><form className="session-dialog" onSubmit={event=>{event.preventDefault();void saveSession();}}><h2>{sessionDialog==='new'?'New Session':'Rename Session'}</h2><label htmlFor="session-name">Session name</label><input id="session-name" value={sessionName} onChange={event=>setSessionName(event.target.value)} autoFocus maxLength={100}/><div><button type="button" onClick={()=>setSessionDialog(null)}>Cancel</button><button type="submit">Save</button></div></form></div>}
+    <section className="session-strip"><span>Session: <strong>{session?.name??'Loading…'}</strong>{showReminder&&' ⚠'}</span><div><button type="button" onClick={()=>sendPanel({type:'statistics'})}>Statistics</button>{obr.role==='GM'&&<><button type="button" onClick={()=>{setSessionName(session?.name??'');setSessionDialog('rename');}}>Rename</button><button type="button" onClick={()=>openNewSession()}>New Session</button></>}</div></section>
+    {showReminder&&<aside className="stale-reminder" aria-label="Session reminder"><strong>Still using "{session?.name}"?</strong><p>{stale.resumedAt?`New activity began at ${new Date(stale.resumedAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})} after ${Math.floor((stale.resumedAt-stale.lastOldRoll)/3600000)} hours of inactivity.`:`No rolls have been recorded for ${Math.floor((Date.now()-stale.lastOldRoll)/3600000)} hours.`}</p><div><button type="button" onClick={()=>openNewSession(stale.resumedAt||undefined)}>New Session</button><button type="button" onClick={continueSession}>Continue Session</button></div></aside>}
+    {sessionDialog&&<div className="session-dialog-backdrop"><form className="session-dialog" onSubmit={event=>{event.preventDefault();void saveSession();}}><h2>{sessionDialog==='new'?'New Session':'Rename Session'}</h2><label htmlFor="session-name">Session name</label><input id="session-name" value={sessionName} onChange={event=>setSessionName(event.target.value)} autoFocus maxLength={100}/>{sessionDialog==='new'&&<><label htmlFor="session-start">Session Start</label><input id="session-start" type="datetime-local" step="0.001" value={sessionStart} onChange={event=>setSessionStart(event.target.value)}/>{startError?<p className="session-error" role="alert">{startError}</p>:!sessionRollsLoaded?<p className="session-preview">Loading current session rolls…</p>:<p className="session-preview">{preview.count===0?'Creating this session will move 0 rolls from the current session.':<>{preview.count} rolls by {preview.rollers} players will move from "{session?.name}" into the new session.<br/>First moved roll: {new Date(preview.first!).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}<br/>Last moved roll: {new Date(preview.last!).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</>}</p>}</>}{sessionError&&<p className="session-error" role="alert">{sessionError}</p>}<div><button type="button" onClick={()=>setSessionDialog(null)}>Cancel</button><button type="submit" disabled={Boolean(startError)||(sessionDialog==='new'&&!sessionRollsLoaded)}>Save</button></div></form></div>}
     <section className="probability" aria-label="Probability distribution">
       <button type="button" className="section-heading section-toggle distribution-heading" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.distribution?'▸':'▾'}</span><strong>Distribution</strong></span><span className="distribution-stats" aria-label={chart?`Range ${chart.range?chart.range.join(' to '):chart.entries.length+' outcomes'}, mean ${chart.mean?.toFixed(2)??'unavailable'}, standard deviation ${chart.standardDeviation?.toFixed(2)??'unavailable'}, mode ${display(chart.mode??'—')}`:'Range, mean, standard deviation, and mode unavailable'}><span>{chart?.range?`Range ${chart.range[0]}–${chart.range[1]}`:chart?`${chart.entries.length} outcomes`:'Range —'}</span><span>Mean {chart?.mean?.toFixed(2)??'—'}</span><span>SD {chart?.standardDeviation?.toFixed(2)??'—'}</span><span>Mode {chart?display(chart.mode??'—'):'—'}</span></span><span className="distribution-method">{chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
       {!collapsed.distribution&&<>

@@ -5,7 +5,7 @@ import { isLocalMessage, LOCAL_CHANNEL, REVEAL_POPOVER_ID, type LocalMessage } f
 import { MAX_API_BROADCAST_BYTES, NO_DICE_API_REQUEST, NO_DICE_API_RESPONSE } from './noDiceApi';
 import { createNoDiceApiHandler } from './noDiceApiHandler';
 import { rollExpression } from './rollService';
-import { appendRoll, LEDGER_CHANNEL, makeSession, migrateHistory, readSharedSession, SESSION_KEY } from './sessionLedger';
+import { appendRoll, ensureSession, LEDGER_CHANNEL, makeSession, migrateHistory, readSharedSession, SESSION_KEY } from './sessionLedger';
 import { EXTENSION_ID } from './constants';
 import { PANEL_CHANNEL, PANEL_POPOVER_ID, isPanelMessage, type PanelMessage } from './panelProtocol';
 import { clearDraft, fittedPosition, loadHeight, loadPosition, saveHeight, savePosition, type PanelPosition } from './panelLayout';
@@ -25,6 +25,7 @@ OBR.onReady(async () => {
   const initialSession=await sharedSession();
   if(role==='GM'&&!initialSession)await OBR.room.setMetadata({[SESSION_KEY]:makeSession()}).catch(()=>{});
   const migration=migrateHistory(roomId,playerId,await sharedSession()).catch(()=>{});
+  OBR.room.onMetadataChange?.(metadata=>{const shared=readSharedSession(metadata);if(shared)void migration.then(()=>ensureSession(roomId,playerId,shared)).catch(()=>{});});
   const verificationChannel=new BroadcastChannel(VERIFY_LOCAL_CHANNEL);
   const verifier=new VerificationClient(roomId,playerId,role,()=>verificationChannel.postMessage({type:'status',roomId,playerId,available:verifier.available} satisfies VerificationLocalMessage));
   void verifier.start().catch(()=>{});

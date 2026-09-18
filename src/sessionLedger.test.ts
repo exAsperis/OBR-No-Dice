@@ -4,7 +4,7 @@ import { EXTENSION_ID } from './constants';
 import { rollExpression } from './rollService';
 import { analyzeSession, queryOutcomes } from './sessionStats';
 import { buildSequenceAnalysis } from './sequenceStats';
-import { appendRoll, defaultSessionName, ensureSession, getRecentRolls, getSessionRolls, listSessions, migrateHistory, normalizeExpression, prune, renameSession, startSession } from './sessionLedger';
+import { appendRoll, defaultSessionName, ensureSession, getRecentRolls, getSessionRolls, listSessions, localDateTime, migrationPreview, migrateHistory, normalizeExpression, parseLocalDateTime, prune, renameSession, rollbackSessionSplit, startSession } from './sessionLedger';
 import type { RollResult } from './protocol';
 
 let sequence=0;
@@ -14,6 +14,31 @@ function makeRoll(expression:string,playerId='joe',faces:number[]=[0],visibility
   return rollExpression({requestId:crypto.randomUUID(),expression,visibility,playerId,playerName:playerId}, {integer:max=>(faces[position++]??0)%max}).record;
 }
 describe('session ledger',()=>{
+  it('splits only the active session at an inclusive boundary and preserves roll contents',async()=>{
+    const {room,player}=identity();const old=await ensureSession(room,player);const base=old.startedAt+1000;
+    const earlier=makeRoll('d6');earlier.time=base-1;await appendRoll(room,player,earlier);
+    const historical=await startSession(room,player,'Historical',base);
+    const times=[base+5999,base+6000,base+10000,base+15000];
+    const source=times.map((time,i)=>{const roll=makeRoll('d20',i%2?'A':'B');roll.time=time;return roll;});
+    for(const roll of source)await appendRoll(room,player,roll);
+    const before=await getSessionRolls(room,player,historical.id);
+    const boundary=times[1];expect(migrationPreview(before,boundary)).toEqual({count:3,rollers:2,first:boundary,last:times[3]});
+    await expect(startSession(room,player,'Stale preview',boundary,2)).rejects.toThrow('preview');
+    expect(await getSessionRolls(room,player,historical.id)).toHaveLength(4);
+    const next=await startSession(room,player,'Next',boundary);
+    expect(next.startedAt).toBe(boundary);
+    expect((await getSessionRolls(room,player,historical.id)).map(x=>x.timestamp)).toEqual([times[0]]);
+    expect((await getSessionRolls(room,player,next.id)).map(x=>x.timestamp)).toEqual(times.slice(1));
+    expect(analyzeSession(await getSessionRolls(room,player,historical.id)).totalRolls).toBe(1);
+    expect(analyzeSession(await getSessionRolls(room,player,next.id)).totalRolls).toBe(3);
+    expect((await getSessionRolls(room,player,old.id)).map(x=>x.id)).toEqual([earlier.requestId]);
+    for(const moved of await getSessionRolls(room,player,next.id)){const original=before.find(x=>x.id===moved.id)!;expect({...moved,sessionId:original.sessionId}).toEqual(original);}
+    expect((await ensureSession(room,player)).id).toBe(next.id);
+    await expect(startSession(room,player,'Invalid',old.startedAt)).rejects.toThrow('earlier');
+    expect((await ensureSession(room,player)).id).toBe(next.id);
+  });
+  it('round trips local date/time without locale parsing',()=>{const date=new Date(2026,8,18,19,4);expect(localDateTime(date)).toBe('2026-09-18T19:04');expect(parseLocalDateTime(localDateTime(date))).toBe(date.getTime());const precise=new Date(2026,8,18,19,4,3,456);expect(parseLocalDateTime(localDateTime(precise,true))).toBe(precise.getTime());expect(Number.isNaN(parseLocalDateTime('2026-02-30T19:04'))).toBe(true);});
+  it('restores the previous session and roll assignments when a room update fails',async()=>{const {room,player}=identity();const previous=await ensureSession(room,player);const roll=makeRoll('d6');roll.time=previous.startedAt+1000;await appendRoll(room,player,roll);const created=await startSession(room,player,'Temporary',roll.time);await rollbackSessionSplit(room,player,previous,created);expect((await ensureSession(room,player)).id).toBe(previous.id);expect((await getSessionRolls(room,player,previous.id)).map(item=>item.id)).toEqual([roll.requestId]);expect(await getSessionRolls(room,player,created.id)).toEqual([]);});
   it('creates, renames and advances a current session without moving old rolls',async()=>{
     const {room,player}=identity();const first=await ensureSession(room,player);expect(first.name).toMatch(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/);const date=new Date(2026,8,17,20,21);expect(defaultSessionName(date)).toBe('2026-09-17 20:21');
     await appendRoll(room,player,makeRoll('2d6+1'));const next=await startSession(room,player,'Second');await appendRoll(room,player,makeRoll('d20'));

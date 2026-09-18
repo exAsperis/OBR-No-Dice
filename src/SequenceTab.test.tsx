@@ -34,9 +34,9 @@ it('applies Roll criteria to individual die faces while Result remains independe
 });
 it('applies PbtA and Nat 20 shortcuts to the visible controls',()=>{
   render(<SequenceTab rolls={[roll('2d6+1','Joe',[5,5],1),roll('d20+5','Bill',[19],2),roll('d20','Joe',[0],3)]}/>);
-  fireEvent.click(screen.getByRole('button',{name:'PbtA'}));
+  fireEvent.click(screen.getByRole('button',{name:'PbtA 6-'}));
   expect((screen.getByLabelText('Expression regex') as HTMLInputElement).value).toBe('^2d6(?:[+-]\\d+)?$');
-  expect(screen.getByText(/1 of 1 expression-matched rolls shown/)).toBeTruthy();
+  expect(screen.getByText(/0 of 1 expression-matched rolls shown/)).toBeTruthy();
   fireEvent.click(screen.getByRole('button',{name:'Nat 20'}));
   expect((screen.getByLabelText('Roll') as HTMLSelectElement).value).toBe('=');
   expect((screen.getByLabelText('Roll value') as HTMLInputElement).value).toBe('20');
