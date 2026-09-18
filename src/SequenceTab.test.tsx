@@ -16,10 +16,17 @@ it('shows selected players as columns and filters chronological rows by final re
   fireEvent.change(screen.getByLabelText('Result'),{target:{value:'<='}});
   fireEvent.change(screen.getByLabelText('Value'),{target:{value:'6'}});
   expect(screen.getByText(/1 of 2 expression-matched rolls shown/)).toBeTruthy();
-  const table=screen.getByRole('table');
+  const table=screen.getAllByRole('table').at(-1)!;
   expect(within(table).getByRole('columnheader',{name:'Joe'})).toBeTruthy();
   expect(within(table).getByRole('columnheader',{name:'Bill'})).toBeTruthy();
   expect(within(table).getAllByRole('row')).toHaveLength(6); // header, one result, four summary rows
   fireEvent.click(screen.getByRole('checkbox',{name:'Bill'}));
   expect(within(table).queryByRole('columnheader',{name:'Bill'})).toBeNull();
+});
+it('applies numeric query criteria to die faces in Dice mode',()=>{
+  render(<SequenceTab rolls={[roll('d20','Joe',[19],1),roll('d6','Bill',[5],2)]}/>);
+  fireEvent.click(screen.getByRole('button',{name:'Dice'}));
+  fireEvent.change(screen.getByLabelText('Die face'),{target:{value:'>='}});
+  fireEvent.change(screen.getByLabelText('Value'),{target:{value:'20'}});
+  expect(screen.getByText(/1 of 2 expression-matched rolls shown/)).toBeTruthy();
 });

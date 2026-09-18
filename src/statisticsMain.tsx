@@ -3,8 +3,8 @@ import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { applyOwlbearTheme } from './theme';
 import { getSessionRolls, LEDGER_CHANNEL, listSessions, migrateHistory, readSharedSession, type DiceSession, type StoredRoll } from './sessionLedger';
-import { analyzeSession, queryOutcomes, type Comparison, type OutcomeMode } from './sessionStats';
-import { SequenceTab } from './SequenceTab';
+import { filterRolls, expressionStats, playerStats } from './analytics';
+import { AnalyticsTabs, tabs, type AnalyticsTab } from './AnalyticsTabs';
 import { EXTENSION_ID } from './constants';
 import { PANEL_CHANNEL, type PanelMessage } from './panelProtocol';
 import './styles.css';
@@ -12,7 +12,7 @@ import './statistics.css';
 
 const percentage=(count:number,total:number)=>total?`${(count/total*100).toFixed(1)}%`:'0.0%';
 const viewTransitionKey=`${EXTENSION_ID}/statistics-view-transition`;
-type StatisticsView={selected:string;tab:'overview'|'sequence';player:string;expression:string;mode:OutcomeMode;operator:Comparison;threshold:string};
+type StatisticsView={selected:string;tab:AnalyticsTab;player:string;expression:string};
 const restoredView=(()=>{try{const value=sessionStorage.getItem(viewTransitionKey);sessionStorage.removeItem(viewTransitionKey);return value?JSON.parse(value) as Partial<StatisticsView>:null;}catch{return null;}})();
 
 function Statistics(){
@@ -20,18 +20,15 @@ function Statistics(){
   const [sessions,setSessions]=useState<DiceSession[]>([]);
   const [selected,setSelected]=useState(restoredView?.selected??'');
   const [rolls,setRolls]=useState<StoredRoll[]>([]);
-  const [tab,setTab]=useState<'overview'|'sequence'>(restoredView?.tab??'overview');
+  const [tab,setTab]=useState<AnalyticsTab>(restoredView?.tab??'overview');
   const [player,setPlayer]=useState(restoredView?.player??'');
   const [expression,setExpression]=useState(restoredView?.expression??'');
-  const [mode,setMode]=useState<OutcomeMode>(restoredView?.mode??'results');
-  const [operator,setOperator]=useState<Comparison>(restoredView?.operator??'<=');
-  const [threshold,setThreshold]=useState(restoredView?.threshold??'6');
   const [maximized]=useState(new URLSearchParams(window.location.search).get('maximized')==='1');
   const controls=useRef<BroadcastChannel|null>(null);
   useEffect(()=>{if(!identity)return;const channel=new BroadcastChannel(PANEL_CHANNEL);controls.current=channel;return()=>{channel.close();controls.current=null;};},[identity]);
   const resize=()=>{
     if(!identity)return;
-    try{sessionStorage.setItem(viewTransitionKey,JSON.stringify({selected,tab,player,expression,mode,operator,threshold} satisfies StatisticsView));}catch{/* Filters reset if storage is unavailable. */}
+    try{sessionStorage.setItem(viewTransitionKey,JSON.stringify({selected,tab,player,expression} satisfies StatisticsView));}catch{/* Filters reset if storage is unavailable. */}
     controls.current?.postMessage({type:'statistics-size',roomId:identity.room,playerId:identity.player,maximized:!maximized} satisfies PanelMessage);
   };
   const close=()=>{if(identity)controls.current?.postMessage({type:'statistics-close',roomId:identity.room,playerId:identity.player} satisfies PanelMessage);};
@@ -50,23 +47,17 @@ function Statistics(){
   },[]);
   useEffect(()=>{if(!identity||!selected)return;let active=true;void getSessionRolls(identity.room,identity.player,selected).then(value=>{if(active)setRolls(value);});return()=>{active=false;};},[identity,selected]);
   useEffect(()=>{if(!identity||!selected)return;const channel=new BroadcastChannel(LEDGER_CHANNEL);channel.onmessage=event=>{if(event.data?.roomId===identity.room&&event.data?.playerId===identity.player)void getSessionRolls(identity.room,identity.player,selected).then(setRolls);};return()=>channel.close();},[identity,selected]);
-  const stats=useMemo(()=>analyzeSession(rolls,player||undefined,expression||undefined,mode),[rolls,player,expression,mode]);
+  const filtered=useMemo(()=>filterRolls(rolls,{player,expression}),[rolls,player,expression]);
+  const players=useMemo(()=>playerStats(rolls),[rolls]);
+  const expressions=useMemo(()=>expressionStats(rolls),[rolls]);
   const selectedSession=sessions.find(item=>item.id===selected);
-  const numeric=threshold.trim()!==''&&Number.isFinite(Number(threshold))?Number(threshold):null;
-  const matches=numeric===null?0:queryOutcomes(stats.distribution,operator,numeric);
   return <main className={`statistics-window${maximized?' maximized':''}`}>
     <header><img className="header-icon" src="./icon.svg" alt="" aria-hidden="true"/><div><h1>Session Statistics</h1><p>Based on rolls visible to you.</p></div><div className="statistics-header-actions"><button type="button" aria-label={maximized?'Restore statistics window':'Maximize statistics window'} title={maximized?'Restore':'Maximize'} aria-pressed={maximized} disabled={!identity} onClick={resize}><svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{maximized?<><rect x="5" y="7" width="13" height="13" rx="1"/><path d="M8 7V4h12v12h-2"/></>:<rect x="4" y="4" width="16" height="16" rx="1"/>}</svg></button><button type="button" aria-label="Close statistics" title="Close" disabled={!identity} onClick={close}>×</button></div></header>
     <div className="statistics-content">
       <label className="session-select">Session <select value={selected} onChange={event=>{setSelected(event.target.value);setPlayer('');setExpression('');}}>{sessions.map(item=><option key={item.id} value={item.id}>{item.endedAt?item.name:`Current Session · ${item.name}`}</option>)}</select></label>
-      <h2>{selectedSession?.name??'Current Session'}</h2>
-      <nav className="statistics-tabs" aria-label="Statistics view"><button type="button" aria-current={tab==='overview'?'page':undefined} onClick={()=>setTab('overview')}>Overview</button><button type="button" aria-current={tab==='sequence'?'page':undefined} onClick={()=>setTab('sequence')}>Roll Sequence</button></nav>
-      {tab==='sequence'?<SequenceTab key={selected} rolls={rolls}/>:<>
-        <div className="headline-stats"><div><strong>{stats.totalRolls}</strong><span>rolls</span></div><div><strong>{stats.totalDice}</strong><span>dice</span></div><div><strong>{stats.distinctRollers}</strong><span>rollers</span></div><div><strong>{stats.distinctExpressions}</strong><span>expressions</span></div></div>
-        <section><h3>Players</h3><table><thead><tr><th>Player</th><th>Rolls</th><th>Dice</th><th>% of session rolls</th></tr></thead><tbody>{stats.players.map(item=><tr key={item.key} className={player===item.key?'selected':''} tabIndex={0} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setPlayer(player===item.key?'':item.key);}}} onClick={()=>setPlayer(player===item.key?'':item.key)}><td>{item.label}</td><td>{item.rolls}</td><td>{item.dice}</td><td>{percentage(item.rolls,stats.totalRolls)}</td></tr>)}</tbody></table>{player&&<button type="button" onClick={()=>setPlayer('')}>Clear player filter</button>}</section>
-        <section><h3>Expressions</h3><table><thead><tr><th>Expression</th><th>Rolls</th><th>Rollers</th></tr></thead><tbody>{stats.expressions.map(item=><tr key={item.key} className={expression===item.key?'selected':''} tabIndex={0} onKeyDown={event=>{if(event.key==='Enter'||event.key===' '){event.preventDefault();setExpression(expression===item.key?'':item.key);}}} onClick={()=>setExpression(expression===item.key?'':item.key)}><td><code>{item.label}</code></td><td>{item.rolls}</td><td>{item.rollers}</td></tr>)}</tbody></table>{expression&&<button type="button" onClick={()=>setExpression('')}>Clear expression filter</button>}</section>
-        <section><h3>Outcomes</h3><div className="mode-tabs"><button type="button" aria-pressed={mode==='results'} onClick={()=>setMode('results')}>Results</button><button type="button" aria-pressed={mode==='dice'} onClick={()=>setMode('dice')}>Dice</button></div><p className="filter-summary">{stats.filteredRolls} roll events selected{player||expression?' by filters':''}.</p><div className="query"><label>Count outcomes <select value={operator} onChange={event=>setOperator(event.target.value as Comparison)}><option>=</option><option>&lt;=</option><option>&gt;=</option></select></label><input type="number" aria-label="Outcome value" value={threshold} onChange={event=>setThreshold(event.target.value)}/><strong>{numeric===null?'Enter a number':`${matches} of ${stats.outcomeCount} ${mode==='results'?'results':'dice'} (${percentage(matches,stats.outcomeCount)})`}</strong></div><table><thead><tr><th>Outcome</th><th>Count</th><th>Observed %</th></tr></thead><tbody>{stats.distribution.map(item=><tr key={`${typeof item.value}:${item.value}`}><td>{item.value}</td><td>{item.count}</td><td>{percentage(item.count,stats.outcomeCount)}</td></tr>)}</tbody></table></section>
-      </>}
-    </div>
+      <div className="shared-filters"><label>Player <select value={player} onChange={event=>setPlayer(event.target.value)}><option value="">All</option>{players.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Expression <select value={expression} onChange={event=>setExpression(event.target.value)}><option value="">All</option>{expressions.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>{(player||expression)&&<button type="button" onClick={()=>{setPlayer('');setExpression('');}}>Clear filters</button>}</div>
+      <nav className="statistics-tabs" aria-label="Statistics view">{tabs.map(item=><button key={item} type="button" aria-current={tab===item?'page':undefined} onClick={()=>setTab(item)}>{item[0].toUpperCase()+item.slice(1)}</button>)}</nav>
+      <AnalyticsTabs tab={tab} rolls={filtered} sessionName={selectedSession?.name??'Current Session'} player={player} expression={expression} onPlayer={setPlayer} onExpression={setExpression}/>    </div>
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<StrictMode><Statistics/></StrictMode>);
