@@ -8,7 +8,7 @@ import { rollExpression } from './rollService';
 import { appendRoll, ensureSession, LEDGER_CHANNEL, makeSession, migrateHistory, readSharedSession, SESSION_KEY } from './sessionLedger';
 import { EXTENSION_ID } from './constants';
 import { PANEL_CHANNEL, PANEL_POPOVER_ID, isPanelMessage, type PanelMessage } from './panelProtocol';
-import { clearDraft, fittedPosition, loadHeight, loadPosition, saveHeight, savePosition, type PanelPosition } from './panelLayout';
+import { clearDraft, clearShowWork, fittedPosition, loadHeight, loadPosition, saveHeight, savePosition, type PanelPosition } from './panelLayout';
 import { RELEASE_VERSION } from './version';
 import { fittedRevealPosition, loadRevealPosition, saveRevealPosition } from './revealLayout';
 import { VerificationClient } from './verification';
@@ -117,6 +117,7 @@ OBR.onReady(async () => {
     if (panelOpening) { closeAfterOpening = true; sendPanelState(false); return; }
     if (panelClosePromise) return panelClosePromise;
     panelOpen = false;
+    clearShowWork(roomId,playerId);
     pendingShortcuts.length = 0;
     sendPanelState(false);
     panelClosePromise = OBR.popover.close(PANEL_POPOVER_ID)

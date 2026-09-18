@@ -6,6 +6,7 @@ export const positionKey = (playerId: string) => `${EXTENSION_ID}/panel-position
 export const collapseKey = (playerId: string) => `${EXTENSION_ID}/panel-collapse/${playerId}`;
 export const draftKey = (roomId: string, playerId: string) => `${EXTENSION_ID}/panel-draft/${roomId}/${playerId}`;
 export const heightKey = (playerId: string) => `${EXTENSION_ID}/panel-height/${playerId}`;
+export const showWorkKey = (roomId: string, playerId: string) => `${EXTENSION_ID}/show-work/${roomId}/${playerId}`;
 export interface CollapsedSections { distribution: boolean; recent: boolean; history: boolean }
 export const DEFAULT_COLLAPSED: CollapsedSections = { distribution: false, recent: false, history: true };
 
@@ -37,6 +38,15 @@ export function loadHeight(playerId: string): number {
 }
 export function saveHeight(playerId: string, height: number) {
   try { localStorage.setItem(heightKey(playerId), String(height)); } catch { /* Storage may be unavailable. */ }
+}
+export function loadShowWork(roomId: string, playerId: string): boolean {
+  try { return localStorage.getItem(showWorkKey(roomId,playerId)) === 'true'; } catch { return false; }
+}
+export function saveShowWork(roomId: string, playerId: string, open: boolean) {
+  try { localStorage.setItem(showWorkKey(roomId,playerId), String(open)); } catch { /* Storage may be unavailable. */ }
+}
+export function clearShowWork(roomId: string, playerId: string) {
+  try { localStorage.removeItem(showWorkKey(roomId,playerId)); } catch { /* Storage may be unavailable. */ }
 }
 
 export function fittedPosition(saved: PanelPosition | null, viewport: PanelSize, panel: PanelSize, margin = 8): PanelPosition {

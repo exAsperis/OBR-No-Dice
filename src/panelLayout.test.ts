@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { clearDraft, fittedPosition, loadCollapsed, loadDraft, loadHeight, loadPosition, saveCollapsed, saveDraft, saveHeight, savePosition } from './panelLayout';
+import { clearDraft, clearShowWork, fittedPosition, loadCollapsed, loadDraft, loadHeight, loadPosition, loadShowWork, saveCollapsed, saveDraft, saveHeight, savePosition, saveShowWork } from './panelLayout';
 
 describe('main panel position', () => {
   beforeEach(() => localStorage.clear());
@@ -40,6 +40,14 @@ describe('main panel position', () => {
   it('remembers the measured panel height for the same player', () => {
     saveHeight('one', 255);
     expect(loadHeight('one')).toBe(255);
+    saveHeight('one', 2400);
+    expect(loadHeight('one')).toBe(2400);
     expect(loadHeight('two')).toBe(440);
+  });
+  it('keeps Show work across internal panel reopens until explicitly cleared', () => {
+    saveShowWork('room','player',true);
+    expect(loadShowWork('room','player')).toBe(true);
+    clearShowWork('room','player');
+    expect(loadShowWork('room','player')).toBe(false);
   });
 });
