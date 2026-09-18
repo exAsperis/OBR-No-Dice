@@ -26,6 +26,7 @@ import { MAX_ROLL_STEPS } from './engine/evaluate';
 import { ResultDisplay } from './ResultDisplay';
 import { resizeExpressionEditor } from './expressionEditor';
 import { ledgerWorkRows } from './ledgerWork';
+import { WorkDieCell } from './WorkDraws';
 import { chartBarTooltip, displayedRolls, inclusiveTails } from './rollPresentation';
 import type { RollMoment } from './rollMoments';
 import './statistics.css';
@@ -378,7 +379,7 @@ export default function App() {
     <div className="entry-meta"><strong>{item.playerName}</strong><span className="entry-meta-right"><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
     <button type="button" className="expression-link" onClick={()=>{setExpression(item.expression);setDialectHint(item.dialect);setSelected(null);}} title="Put this expression back in the input">{item.expression}</button>
     {item.label&&<div className="entry-label">{item.label}</div>}
-    <details className="work-details" open={isRecent?showWorkOpen:undefined} onToggle={isRecent?event=>{const open=event.currentTarget.open;setShowWorkOpen(open);if(obr.roomId&&obr.playerId)saveShowWork(obr.roomId,obr.playerId,open);}:undefined}><summary>Show work</summary><div className="work-rows">{ledgerWorkRows(item).map((row,i)=><div className="work-row" key={i}><span className="work-die">{row.die}</span><span className="work-expression">{row.expression}{row.drawIndices?.map(index=>{const draw=item.resolution?.dice[index];const moment=momentsByRollId.get(item.requestId)?.find(moment=>moment.type==='die-rarity'&&moment.drawIndex===index);return draw&&moment?<span key={index} className={`work-draw rarity-${moment.tier}`} title={moment.label}>{String(draw.face)}</span>:null;})}</span></div>)}</div></details>
+    <details className="work-details" open={isRecent?showWorkOpen:undefined} onToggle={isRecent?event=>{const open=event.currentTarget.open;setShowWorkOpen(open);if(obr.roomId&&obr.playerId)saveShowWork(obr.roomId,obr.playerId,open);}:undefined}><summary>Show work</summary><div className="work-rows">{ledgerWorkRows(item).map((row,i)=><div className="work-row" key={i}><WorkDieCell die={row.die} result={item} indices={row.drawIndices} moments={momentsByRollId.get(item.requestId)??[]}/><span className="work-expression">{row.expression}</span></div>)}</div></details>
     <ResultDisplay result={item} moments={momentsByRollId.get(item.requestId)??[]}/>
   </article>;
   return <main className={`no-dice${roomSettings.overrideMode?.enabled?' override-active':''}`} ref={panelRef}>

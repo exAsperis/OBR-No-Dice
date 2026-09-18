@@ -7,23 +7,23 @@ import type { RollResult } from './protocol';
 const fixed = (...values: number[]) => { let index = 0; return { integer: () => values[index++] }; };
 const record = (expression: string, draws: number[]): RollResult => {
   const outcome = roll(parse(expression), fixed(...draws));
-  return { version: 1, requestId: expression, expression, dialect: 'nodice', visibility: 'everyone', playerId: 'p', playerName: 'Player', value: outcome.value, trace: outcome.trace, steps: outcome.stages, stepDice: outcome.stageDice, time: 1 };
+  return { version: 1, requestId: expression, expression, dialect: 'nodice', visibility: 'everyone', playerId: 'p', playerName: 'Player', value: outcome.value, trace: outcome.trace, steps: outcome.stages, stepDice: outcome.stageDice, stepDrawIndices:outcome.stageDrawIndices,resolution:{ast:parse(expression),dice:outcome.dice??[]}, time: 1 };
 };
 
-describe('two-column ledger work', () => {
+describe('three-column ledger work', () => {
   it('labels dice reductions and leaves arithmetic reductions unlabeled', () => {
     expect(ledgerWorkRows(record('2d6+d4', [2, 3, 1]))).toEqual([
       { die: '', expression: '2d6+d4' },
-      { die: '2d6 →', expression: '[3, 4] + d4' },
+      { die: '2d6 →', drawIndices:[0,1], expression: '[3, 4] + d4' },
       { die: '', expression: '7 + d4' },
-      { die: 'd4 →', expression: '7 + [2]' },
+      { die: 'd4 →', drawIndices:[2], expression: '7 + [2]' },
       { die: '', expression: '7 + 2' },
     ]);
   });
   it('does not repeat a final scalar or pool result', () => {
     expect(ledgerWorkRows(record('d6', [2]))).toEqual([
       { die: '', expression: 'd6' },
-      { die: 'd6 →', expression: '[3]' },
+      { die: 'd6 →', drawIndices:[0], expression: '[3]' },
     ]);
     expect(ledgerWorkRows(record('p2d6', [1, 2]))).toEqual([{ die: '', expression: 'p2d6' }]);
   });
@@ -41,5 +41,9 @@ describe('two-column ledger work', () => {
     const roll=record('2d20',[0,19]);
     roll.stepDrawIndices=[[],[0,1],[]];
     expect(ledgerWorkRows(roll)[1].drawIndices).toEqual([0,1]);
+  });
+  it('labels the die and both draws when a selector reduces its source', () => {
+    const rows=ledgerWorkRows(record('H[2d20]',[6,8]));
+    expect(rows.find(row=>row.expression==='H[7,9]')).toMatchObject({die:'2d20 →',drawIndices:[0,1]});
   });
 });

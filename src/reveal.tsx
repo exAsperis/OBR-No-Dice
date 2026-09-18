@@ -10,6 +10,9 @@ import { DEFAULT_ROOM_SETTINGS, readRoomSettings } from './roomSettings';
 import type { Distribution } from './engine/probability';
 import { Toggle } from './Toggle';
 import { ResultDisplay } from './ResultDisplay';
+import { WorkDieCell } from './WorkDraws';
+import { getSessionRolls, normalizeExpression, readSharedSession, type StoredRoll } from './sessionLedger';
+import type { RollMoment } from './rollMoments';
 import './reveal.css';
 
 const DISMISS_ENABLED_KEY = `${EXTENSION_ID}/reveal-auto-dismiss`;
@@ -87,6 +90,7 @@ function Reveal() {
   const [dismissTiming, setDismissTiming] = useState<{ requestId: string; deadline: number; remainingMs: number; startScale: number } | null>(null);
   const [calculationSpeedMs, setCalculationSpeedMs] = useState(DEFAULT_ROOM_SETTINGS.calculationSpeedMs);
   const [finishedRequestId, setFinishedRequestId] = useState<string | null>(null);
+  const [moments, setMoments] = useState<{requestId:string; items:RollMoment[]}>({requestId:'',items:[]});
   const channel = useRef<BroadcastChannel | null>(null);
   const identity = useRef<{ roomId: string; playerId: string } | null>(null);
   const list = useRef<HTMLDivElement | null>(null);
@@ -157,6 +161,27 @@ function Reveal() {
     worker.postMessage({ id: 1, expression: result.expression, dialect: result.dialect });
     return () => worker.terminate();
   }, [result]);
+  useEffect(() => {
+    if (!result?.resolution || !identity.current) return;
+    let active = true;
+    const worker = new Worker(new URL('./moments.worker.ts', import.meta.url), { type: 'module' });
+    worker.onmessage = (event: MessageEvent<{moments:[string,RollMoment[]][]}>) => {
+      if (active) setMoments({requestId:result.requestId,items:new Map(event.data.moments).get(result.requestId)??[]});
+    };
+    void (async () => {
+      const metadata = await OBR.room.getMetadata();
+      const shared = readSharedSession(metadata);
+      const {roomId,playerId} = identity.current!;
+      const rolls = shared ? await getSessionRolls(roomId,playerId,shared.id) : [];
+      if (!rolls.some(roll => roll.id === result.requestId)) rolls.push({
+        id:result.requestId,sessionId:shared?.id??'',timestamp:result.time,rollerId:result.playerId,
+        rollerName:result.playerName,expression:result.expression,normalizedExpression:normalizeExpression(result),
+        finalResult:result.value,resolution:result.resolution!,visibility:result.visibility,result,
+      } satisfies StoredRoll);
+      if (active) worker.postMessage({id:1,rolls});
+    })().catch(() => { if (active) worker.postMessage({id:1,rolls:[{id:result.requestId,sessionId:'',timestamp:result.time,rollerId:result.playerId,rollerName:result.playerName,expression:result.expression,normalizedExpression:normalizeExpression(result),finalResult:result.value,resolution:result.resolution!,visibility:result.visibility,result} satisfies StoredRoll]}); });
+    return () => { active = false; worker.terminate(); };
+  }, [result]);
   const lines = useMemo(() => result ? revealLines(result) : [], [result]);
   const visible = lines.slice(0, visibleCount);
   useEffect(() => {
@@ -218,11 +243,11 @@ function Reveal() {
         const previous = lines[index - 1]?.text;
         const change = previous === undefined ? null : line.final ? {prefix:'',removed:previous,added:line.text,suffix:''} : reductionDiff(previous, line.text);
         return <div key={`${result?.requestId}-${index}`} className={`reveal-line ${line.final ? 'reveal-final' : ''} ${index ? 'reveal-entering' : ''}`} onAnimationEnd={line.final ? event => { if (event.target === event.currentTarget && event.animationName === 'reveal-drop') setFinishedRequestId(result!.requestId); } : undefined} style={change ? { '--from-width': `${Math.min(change.removed.length, 90)}ch`, '--to-width': `${Math.min(change.added.length, 90)}ch` } as CSSProperties : undefined}>
-          {line.final && result ? <ResultDisplay result={result} announce/> : change ? <span className="reveal-transition">
+          {line.final && result ? <ResultDisplay result={result} moments={moments.requestId===result.requestId?moments.items:[]} announce/> : <><span className="reveal-work-left">{result&&<WorkDieCell die={line.die} result={result} indices={line.drawIndices} moments={moments.requestId===result.requestId?moments.items:[]}/>}</span><span className="reveal-work-center">{change ? <span className="reveal-transition">
             <span>{change.prefix}</span>
             <span className="reveal-change"><span className="reveal-old-term" aria-hidden="true">{change.removed}</span><span className="reveal-new-term">{change.added}</span></span>
             <span>{change.suffix}</span>
-          </span> : <span className="reveal-original">{line.text}</span>}
+          </span> : <span className="reveal-original">{line.text}</span>}</span><span aria-hidden="true"/></>}
         </div>;
       })}
     </div>

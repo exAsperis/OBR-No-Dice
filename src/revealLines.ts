@@ -7,7 +7,7 @@ import { resultHeading } from './expressionName';
 const display = (value: Value) => Array.isArray(value) ? `[${value.join(', ')}]` : String(value);
 const compact = (line: string) => line.length > 100 ? `${line.slice(0, 99)}…` : line;
 
-export interface RevealLine { text: string; final: boolean }
+export interface RevealLine { text: string; final: boolean; die?: string; drawIndices?: number[] }
 
 export function reductionDiff(previous: string, next: string) {
   let start = 0;
@@ -28,10 +28,14 @@ export const nextRevealCount = (current: number, total: number) => Math.min(tota
 export function revealLines(result: RollResult): RevealLine[] {
   let short = result.expression;
   try { short = result.steps?.[0] ?? formatShort(parse(result.expression, result.dialect)); } catch { /* Original remains readable. */ }
-  const work = (result.steps?.slice(1) ?? result.trace).map(compact);
+  const work = (result.steps?.slice(1) ?? result.trace).map((text, index) => ({
+    text: compact(text), final: false,
+    ...(result.stepDice?.[index + 1] ? { die: `${result.stepDice[index + 1]} →` } : {}),
+    ...(result.stepDrawIndices?.[index + 1]?.length ? { drawIndices: result.stepDrawIndices[index + 1] } : {}),
+  }));
   return [
     { text: compact(short), final: false },
-    ...work.map(text => ({ text, final: false })),
+    ...work,
     { text: result.error ? `ERROR: ${result.error}` : `${resultHeading(result.expression)}: ${display(result.value)}${result.interpretation ? ` · ${result.interpretation}` : ''}`, final: true },
   ];
 }

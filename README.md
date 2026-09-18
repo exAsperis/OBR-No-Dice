@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.30.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.31.3.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -195,3 +195,12 @@ Version 0.29.0 adds Roll Moments for rare individual die faces, numeric final re
 Version 0.29.1 keeps the Most Recent Result card height steady while rolling, remembers whether its Show work section is expanded until the panel closes, and lets the panel grow to fit the recent result up to the viewport height. Expanded History keeps its own scroll limit. This compatible layout fix does not change expressions, roll results, or broadcast messages.
 
 Version 0.30.0 adds GM-controlled room-wide Override Mode. Configure legal `dN` face values in GM Settings, then enable the mode to force matching die draws for all users and fairness observations. Theoretical probabilities and Roll Moments remain based on fair dice. Enabling Override stores the previous Verifiable Rolls setting and real session, turns verification off, and creates a disposable OVERRIDE session; disabling deletes that session and its rolls and restores both prior settings. Rolls made during the mode carry an optional `overridden` marker in the existing version 1 broadcast result, so existing consumers remain compatible. Expression syntax and public API request formats are unchanged.
+
+
+Version 0.31.0 shows a badge for every recorded die draw in a dedicated column in Show Work and the timed result reveal. Selector reductions retain their source die term, and the reveal applies the same die, result, and streak rarity decorations as the ledger. This compatible presentation release does not change expression syntax or the broadcast protocol.
+
+Version 0.31.1 aligns the die term, draw badges, and expression in shared columns across each Most Recent Result and History Show Work block. Badge groups wrap for larger dice pools. This compatible layout fix does not change roll results or the broadcast protocol.
+
+Version 0.31.2 groups each die term with its draw badges in one wrapping cell in Show Work and the timed result window. Evaluated expressions remain in their own column. This compatible layout fix does not change roll results or the broadcast protocol.
+
+Version 0.31.3 keeps unchanged trailing expression text visible during result-window reduction animations. For example, the + 2 remains visible when 2d6+2 becomes [6, 5] + 2. This compatible visual fix does not change roll results or the broadcast protocol.

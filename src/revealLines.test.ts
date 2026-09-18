@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { nextRevealCount, REVEAL_LINE_INTERVAL_MS, reductionDiff, revealLines } from './revealLines';
 import type { RollResult } from './protocol';
+import { parse } from './engine/parser';
+import { roll } from './engine/evaluate';
 
 const base: RollResult = { version: 1, requestId: 'a', expression: 'highest 1 of [2d6]', dialect: 'nodice', visibility: 'everyone', playerId: 'p', playerName: 'Bryan', value: 6, trace: ['2d6 → [3, 6]', 'keep highest → 6'], time: 1 };
 describe('roll reveal lines', () => {
@@ -31,7 +33,14 @@ describe('roll reveal lines', () => {
     expect([1,2,3].map(count=>nextRevealCount(count,3))).toEqual([2,3,3]);
   });
   it('isolates changing terms while retaining surrounding expression text', () => {
+    expect(reductionDiff('2d6+2','[6, 5] + 2')).toEqual({prefix:'',removed:'2d6+',added:'[6, 5] + ',suffix:'2'});
     expect(reductionDiff('[2, 3] + 2','5 + 2')).toEqual({prefix:'',removed:'[2, 3]',added:'5',suffix:' + 2'});
     expect(reductionDiff('H(d4)[4d6]+2','H3[2,5,6,1]+2')).toEqual({prefix:'H',removed:'(d4)[4d6',added:'3[2,5,6,1',suffix:']+2'});
+  });
+  it('reveals source dice and draw badges on the same timed selector step', () => {
+    let index=0;
+    const outcome=roll(parse('H[2d20]'),{integer:()=>[6,8][index++]});
+    const lines=revealLines({...base,expression:'H[2d20]',steps:outcome.stages,stepDice:outcome.stageDice,stepDrawIndices:outcome.stageDrawIndices});
+    expect(lines.find(line=>line.text==='H[7,9]')).toMatchObject({die:'2d20 →',drawIndices:[0,1],final:false});
   });
 });

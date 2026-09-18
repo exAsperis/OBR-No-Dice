@@ -148,6 +148,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
     }
     case 'selector':{
       const countResult=evaluateNode(node.count,rng,'scalar',plan,presentation,showStages,budget,true);const count=positiveInteger(countResult.value,'Selection count',100);
+      const firstSourceDraw=budget.dice.length;
       const source=evaluateNode(node.source,rng,'pool-source',plan,presentation,false,budget);const values=members(source.value);
       if(count>values.length)throw new ExpressionError(`Cannot select or drop ${count} results from a pool of ${values.length}`);
       const ranks=rankMap(node.source);
@@ -157,7 +158,11 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       const selected=node.operator==='highest'?sorted.slice(-count):node.operator==='lowest'?sorted.slice(0,count):node.operator==='drop-highest'?sorted.slice(0,sorted.length-count):sorted.slice(count);
       const kept=selected.sort((a,b)=>a.index-b.index).map(x=>x.value);
       const trace=[...countResult.trace,...source.trace,`${formatShort(node)} → ${show(kept)}`];
-      presentation.replace(node.count,String(count));presentation.replace(node.source,values.map(String).join(','));if(showStages)presentation.show();
+      presentation.replace(node.count,String(count));presentation.replace(node.source,values.map(String).join(','));if(showStages){
+        const indices=Array.from({length:budget.dice.length-firstSourceDraw},(_,index)=>firstSourceDraw+index);
+        const die=indices.length&&indices.every(index=>budget.dice[index].die===budget.dice[indices[0]].die)?budget.dice[indices[0]].die:'';
+        presentation.show(die,indices);
+      }
       presentation.replace(node,show(kept));if(showStages)presentation.show();
       if(kept.every(v=>typeof v==='number')){const value=kept.reduce<number>((a,b)=>a+(b as number),0);presentation.replace(node,String(value));if(showStages&&!presentation.isRoot(node))presentation.show();return {value,trace:[...trace,`sum → ${value}`],stages:presentation.stages};}
       return {value:kept.length===1?kept[0]:kept,trace,stages:presentation.stages};
