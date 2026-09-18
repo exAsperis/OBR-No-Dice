@@ -2,8 +2,9 @@ import { parse, parseAuto } from './engine/parser';
 import type { Dialect } from './engine/ast';
 import { FairnessSampler } from './engine/fairness';
 import { fairnessRollsPerSecond } from './engine/fairnessPacing';
+import type { DieOverride } from './dieOverrides';
 
-type Command = { type: 'start'; id: number; expression: string; dialect?: Dialect } | { type: 'stop'; id: number };
+type Command = { type: 'start'; id: number; expression: string; dialect?: Dialect; overrides?: DieOverride[] } | { type: 'stop'; id: number };
 let active: { id: number; sampler: FairnessSampler; timer: number; lastReport: number; startedAt: number; lastTick: number; credit: number } | null = null;
 
 function stop() {
@@ -45,7 +46,7 @@ self.onmessage = (event: MessageEvent<Command>) => {
   stop();
   try {
     const now = performance.now();
-    active = { id: command.id, sampler: new FairnessSampler(command.dialect?parse(command.expression,command.dialect):parseAuto(command.expression).ast), timer: 0, lastReport: now, startedAt: now, lastTick: now, credit: 1 };
+    active = { id: command.id, sampler: new FairnessSampler(command.dialect?parse(command.expression,command.dialect):parseAuto(command.expression).ast,undefined,command.overrides), timer: 0, lastReport: now, startedAt: now, lastTick: now, credit: 1 };
     tick(command.id);
   } catch (error) {
     self.postMessage({ id: command.id, type: 'error', error: error instanceof Error ? error.message : 'Sampling failed' });

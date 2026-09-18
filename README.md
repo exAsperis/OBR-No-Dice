@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.29.1.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.30.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -193,3 +193,5 @@ Version 0.28.0 renames the Statistics Query tab to Ledger and adds client-side C
 Version 0.29.0 adds Roll Moments for rare individual die faces, numeric final results, and repeated player-expression-result streaks. Moments use exact probabilities only and are calculated from locally visible current-session rolls. This compatible feature adds visual borders, die markers, and streak lines; it does not change roll expressions or broadcast message versions.
 
 Version 0.29.1 keeps the Most Recent Result card height steady while rolling, remembers whether its Show work section is expanded until the panel closes, and lets the panel grow to fit the recent result up to the viewport height. Expanded History keeps its own scroll limit. This compatible layout fix does not change expressions, roll results, or broadcast messages.
+
+Version 0.30.0 adds GM-controlled room-wide Override Mode. Configure legal `dN` face values in GM Settings, then enable the mode to force matching die draws for all users and fairness observations. Theoretical probabilities and Roll Moments remain based on fair dice. Enabling Override stores the previous Verifiable Rolls setting and real session, turns verification off, and creates a disposable OVERRIDE session; disabling deletes that session and its rolls and restores both prior settings. Rolls made during the mode carry an optional `overridden` marker in the existing version 1 broadcast result, so existing consumers remain compatible. Expression syntax and public API request formats are unchanged.

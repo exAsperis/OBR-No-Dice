@@ -3,6 +3,7 @@ import { cryptoRng, roll, type Rng, type Value } from './engine/evaluate';
 import { formatLongReadable, formatShort } from './engine/format';
 import { parse, parseAuto } from './engine/parser';
 import type { RollResult, Visibility } from './protocol';
+import { overrideFacetIndex, type DieOverride } from './dieOverrides';
 
 export const displayValue = (value: Value): string => Array.isArray(value) ? `[${value.join(', ')}]` : String(value);
 
@@ -15,6 +16,8 @@ export interface RollExpressionInput {
   playerName: string;
   label?: string;
   source?: string;
+  overridden?: boolean;
+  overrides?: DieOverride[];
 }
 
 export interface CompletedRoll {
@@ -29,7 +32,7 @@ export function rollExpression(input: RollExpressionInput, rng: Rng = cryptoRng)
   const parsed = input.dialect
     ? { ast: parse(input.expression, input.dialect), dialect: input.dialect }
     : parseAuto(input.expression);
-  const outcome = roll(parsed.ast, rng);
+  const outcome = roll(parsed.ast, rng, true, input.overridden ? {dieOverride:({node,faceCount})=>overrideFacetIndex(node,faceCount,input.overrides??[])} : undefined);
   const record: RollResult = {
     version: 1,
     requestId: input.requestId,
@@ -48,6 +51,7 @@ export function rollExpression(input: RollExpressionInput, rng: Rng = cryptoRng)
     time: Date.now(),
     label: input.label,
     source: input.source,
+    overridden: input.overridden ? true : undefined,
   };
   return {
     record,

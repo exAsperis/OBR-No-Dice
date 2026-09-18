@@ -40,8 +40,8 @@ function RevealDistribution({ distribution, result, highlighted }: { distributio
       if (!context) return;
       const colors = getComputedStyle(container);
       const normalColor = colors.getPropertyValue('--accent').trim() || '#a68bfa';
-      const highlightColor = colors.getPropertyValue(result.verification?.state === 'verified' ? '--verified-gold' : '--result-blue').trim()
-        || (result.verification?.state === 'verified' ? '#b88722' : '#4da3ff');
+      const highlightColor = colors.getPropertyValue(result.overridden ? '--override-red' : result.verification?.state === 'verified' ? '--verified-gold' : '--result-blue').trim()
+        || (result.overridden ? '#c93440' : result.verification?.state === 'verified' ? '#b88722' : '#4da3ff');
       const max = Math.max(...entries.map(entry => entry.probability));
       const barWidth = width / entries.length;
       for (let index = 0; index < entries.length; index++) {

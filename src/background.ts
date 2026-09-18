@@ -5,7 +5,7 @@ import { isLocalMessage, LOCAL_CHANNEL, REVEAL_POPOVER_ID, type LocalMessage } f
 import { MAX_API_BROADCAST_BYTES, NO_DICE_API_REQUEST, NO_DICE_API_RESPONSE } from './noDiceApi';
 import { createNoDiceApiHandler } from './noDiceApiHandler';
 import { rollExpression } from './rollService';
-import { appendRoll, ensureSession, LEDGER_CHANNEL, makeSession, migrateHistory, readSharedSession, SESSION_KEY } from './sessionLedger';
+import { appendRoll, LEDGER_CHANNEL, makeSession, migrateHistory, readSharedSession, SESSION_KEY, synchronizeRoomSession } from './sessionLedger';
 import { EXTENSION_ID } from './constants';
 import { PANEL_CHANNEL, PANEL_POPOVER_ID, isPanelMessage, type PanelMessage } from './panelProtocol';
 import { clearDraft, clearShowWork, fittedPosition, loadHeight, loadPosition, saveHeight, savePosition, type PanelPosition } from './panelLayout';
@@ -21,11 +21,17 @@ OBR.onReady(async () => {
   const roomId = OBR.room.id;
   const playerId = OBR.player.id;
   const role = await OBR.player.getRole();
-  const sharedSession=async()=>{try{return readSharedSession(await OBR.room.getMetadata());}catch{return undefined;}};
-  const initialSession=await sharedSession();
+  const roomSnapshot=async()=>{const metadata=await OBR.room.getMetadata();const settings=readRoomSettings(metadata),session=readSharedSession(metadata);
+    if(Boolean(settings.overrideMode?.enabled)!==(session?.kind==='override')||(settings.overrideMode?.enabled&&session?.id!==settings.overrideMode.overrideSession?.id))throw new Error('Override Mode is updating. Try again.');
+    return {settings,session,previous:settings.overrideMode?.enabled?settings.overrideMode.previousSession:undefined};};
+  const initialSession=readSharedSession(await OBR.room.getMetadata().catch(()=>({})));
   if(role==='GM'&&!initialSession)await OBR.room.setMetadata({[SESSION_KEY]:makeSession()}).catch(()=>{});
-  const migration=migrateHistory(roomId,playerId,await sharedSession()).catch(()=>{});
-  OBR.room.onMetadataChange?.(metadata=>{const shared=readSharedSession(metadata);if(shared)void migration.then(()=>ensureSession(roomId,playerId,shared)).catch(()=>{});});
+  const initial=await roomSnapshot().catch(()=>({session:undefined,previous:undefined}));
+  const migration=migrateHistory(roomId,playerId,initial.previous??initial.session).then(()=>synchronizeRoomSession(roomId,playerId,initial.session,initial.previous)).catch(()=>{});
+  let sessionQueue:Promise<unknown>=migration;
+  OBR.room.onMetadataChange?.(metadata=>{const settings=readRoomSettings(metadata),session=readSharedSession(metadata),previous=settings.overrideMode?.enabled?settings.overrideMode.previousSession:undefined;
+    sessionQueue=sessionQueue.catch(()=>{}).then(()=>synchronizeRoomSession(roomId,playerId,session,previous)).catch(()=>{});
+  });
   const verificationChannel=new BroadcastChannel(VERIFY_LOCAL_CHANNEL);
   const verifier=new VerificationClient(roomId,playerId,role,()=>verificationChannel.postMessage({type:'status',roomId,playerId,available:verifier.available} satisfies VerificationLocalMessage));
   void verifier.start().catch(()=>{});
@@ -33,7 +39,7 @@ OBR.onReady(async () => {
     const message=event.data;
     if(!message||message.roomId!==roomId||message.playerId!==playerId)return;
     if(message.type==='status-request')verificationChannel.postMessage({type:'status',roomId,playerId,available:verifier.available} satisfies VerificationLocalMessage);
-    if(message.type==='roll')void verifier.roll(message.input).then(result=>verificationChannel.postMessage({type:'roll-response',roomId,playerId,requestId:message.requestId,verification:result.verification} satisfies VerificationLocalMessage)).catch(()=>verificationChannel.postMessage({type:'roll-response',roomId,playerId,requestId:message.requestId} satisfies VerificationLocalMessage));
+    if(message.type==='roll')void roomSnapshot().then(snapshot=>snapshot.settings.overrideMode?.enabled?undefined:verifier.roll(message.input)).then(result=>verificationChannel.postMessage({type:'roll-response',roomId,playerId,requestId:message.requestId,verification:result?.verification} satisfies VerificationLocalMessage)).catch(()=>verificationChannel.postMessage({type:'roll-response',roomId,playerId,requestId:message.requestId} satisfies VerificationLocalMessage));
   };
   const local = new BroadcastChannel(LOCAL_CHANNEL);
   const ledgerEvents = new BroadcastChannel(LEDGER_CHANNEL);
@@ -255,7 +261,7 @@ OBR.onReady(async () => {
       revealResume = null;
     }
     if (message.type === 'revealed' && isResult(message.result)) {
-      void migration.then(async()=>{await appendRoll(roomId,playerId,message.result,await sharedSession());ledgerEvents.postMessage({roomId,playerId});}).catch(()=>{});
+      void migration.then(async()=>{const snapshot=await roomSnapshot();await appendRoll(roomId,playerId,message.result,snapshot.session,snapshot.previous);ledgerEvents.postMessage({roomId,playerId});}).catch(()=>{});
     }
     if (message.type === 'dismiss') {
       current = null;
@@ -276,18 +282,22 @@ OBR.onReady(async () => {
       local.postMessage({ type: 'reroll-started', roomId, playerId, requestId } satisfies LocalMessage);
       void (async () => {
         try {
+          const snapshot=await roomSnapshot(),overridden=snapshot.settings.overrideMode?.enabled===true;
           const input = {
             requestId, expression: original.expression, dialect: original.dialect,
             visibility: original.visibility, playerId, playerName: await OBR.player.getName(),
             label: original.label, source: original.source,
+            overridden,overrides:overridden?snapshot.settings.overrideMode?.overrides:undefined,
           };
-          const enabled = readRoomSettings(await OBR.room.getMetadata()).verifiableRollsEnabled;
+          const enabled = !overridden&&snapshot.settings.verifiableRollsEnabled;
           const verification = enabled ? (await verifier.roll(input)).verification : undefined;
           const rng = verification?.state === 'verified' ? await new SeededRng(verification.finalSeed!).expand(MAX_ROLL_STEPS + 128) : undefined;
           const record: RollResult = verification?.state === 'failed'
             ? { version: 1, ...input, value: '', trace: [], time: Date.now(), error: 'Verification failed', verification }
             : rollExpression(input, rng).record;
           if (verification?.state === 'verified') record.verification = verification;
+          const latest=await roomSnapshot();
+          if(latest.session?.id!==snapshot.session?.id||Boolean(latest.settings.overrideMode?.enabled)!==overridden)throw new Error('Room mode changed during the roll. Try again.');
           if (record.visibility === 'everyone') await OBR.broadcast.sendMessage(RESULT_CHANNEL, record);
           if (record.visibility === 'gm' && role !== 'GM') await OBR.broadcast.sendMessage(GM_CHANNEL, await encryptForGm(record));
           present(record);
@@ -312,11 +322,14 @@ OBR.onReady(async () => {
     }).catch(() => {});
   });
   const handleApiRequest = createNoDiceApiHandler({
-    roll: async (expression, requestId, label) => rollExpression({
+    roll: async (expression, requestId, label) => {const snapshot=await roomSnapshot(),overridden=snapshot.settings.overrideMode?.enabled===true;return rollExpression({
       requestId, expression, visibility: 'everyone', playerId,
-      playerName: await OBR.player.getName(), label, source: 'external-api',
-    }),
+      playerName: await OBR.player.getName(), label, source: 'external-api',overridden,
+      overrides:overridden?snapshot.settings.overrideMode?.overrides:undefined,
+    });},
     record: async completed => {
+      const snapshot=await roomSnapshot();
+      if(Boolean(completed.record.overridden)!==Boolean(snapshot.settings.overrideMode?.enabled))throw new Error('Room mode changed during the roll. Try again.');
       const record = { ...completed.record, trace: [...completed.record.trace], steps: [...(completed.record.steps ?? [])] };
       const size = () => new TextEncoder().encode(JSON.stringify(record)).length;
       while (size() > MAX_API_BROADCAST_BYTES && (record.trace.length || record.steps.length)) {

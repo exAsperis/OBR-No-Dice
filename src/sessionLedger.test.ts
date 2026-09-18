@@ -4,8 +4,9 @@ import { EXTENSION_ID } from './constants';
 import { rollExpression } from './rollService';
 import { analyzeSession, queryOutcomes } from './sessionStats';
 import { buildSequenceAnalysis } from './sequenceStats';
-import { appendRoll, defaultSessionName, ensureSession, getRecentRolls, getSessionRolls, listSessions, localDateTime, migrationPreview, migrateHistory, normalizeExpression, parseLocalDateTime, prune, renameSession, rollbackSessionSplit, startSession } from './sessionLedger';
+import { appendRoll, defaultSessionName, ensureSession, enterOverrideSession, getRecentRolls, getSessionRolls, listSessions, localDateTime, migrationPreview, migrateHistory, normalizeExpression, parseLocalDateTime, prune, renameSession, rollbackSessionSplit, startSession, synchronizeRoomSession } from './sessionLedger';
 import type { RollResult } from './protocol';
+import { analyzeRollMoments } from './rollMoments';
 
 let sequence=0;
 const identity=()=>({room:`room-${++sequence}`,player:'local-player'});
@@ -14,6 +15,35 @@ function makeRoll(expression:string,playerId='joe',faces:number[]=[0],visibility
   return rollExpression({requestId:crypto.randomUUID(),expression,visibility,playerId,playerName:playerId}, {integer:max=>(faces[position++]??0)%max}).record;
 }
 describe('session ledger',()=>{
+  it('suspends the real session without migrating rolls and purges the disposable session on exit',async()=>{
+    const {room,player}=identity(),real=await ensureSession(room,player);
+    const before=makeRoll('d6');await appendRoll(room,player,before,real);
+    const original=await getSessionRolls(room,player,real.id);
+    const temporary={id:'override-test',name:'OVERRIDE',startedAt:real.startedAt+1000,kind:'override' as const};
+    await enterOverrideSession(room,player,real,temporary);
+    await enterOverrideSession(room,player,real,temporary); // Reload/duplicate metadata event.
+    expect((await synchronizeRoomSession(room,'other-player',temporary,real)).id).toBe(temporary.id);
+    expect((await getSessionRolls(room,player,real.id))).toEqual(original);
+    expect((await listSessions(room,player)).filter(item=>!item.endedAt).map(item=>item.id)).toEqual([temporary.id]);
+    const forced=rollExpression({requestId:crypto.randomUUID(),expression:'d20',visibility:'everyone',playerId:'joe',playerName:'Joe',overridden:true,overrides:[{die:'d20',value:20}]},{integer:()=>0}).record;
+    forced.time=temporary.startedAt+1;
+    await appendRoll(room,player,forced,temporary,real);
+    const repeated=Array.from({length:2},()=>rollExpression({requestId:crypto.randomUUID(),expression:'d20',visibility:'everyone',playerId:'joe',playerName:'Joe',overridden:true,overrides:[{die:'d20',value:20}]},{integer:()=>0}).record);
+    for(const [index,roll] of repeated.entries()){roll.time=temporary.startedAt+index+2;await appendRoll(room,player,roll,temporary,real);}
+    const testing=await getSessionRolls(room,player,temporary.id);
+    expect(testing.map(item=>item.id)).toEqual([forced.requestId,...repeated.map(roll=>roll.requestId)]);
+    expect(analyzeRollMoments(testing).get(repeated[1].requestId)?.find(moment=>moment.type==='streak-rarity')?.tier).toBe('exceptional');
+    await synchronizeRoomSession(room,player,real); // Also repairs a client that missed the disable event.
+    await synchronizeRoomSession(room,'other-player',real);
+    expect(await getSessionRolls(room,player,temporary.id)).toEqual([]);
+    expect((await listSessions(room,player)).some(item=>item.id===temporary.id)).toBe(false);
+    expect((await listSessions(room,player)).find(item=>item.id===real.id)).toEqual(real);
+    expect(await getSessionRolls(room,player,real.id)).toEqual(original);
+    expect((await listSessions(room,'other-player')).some(item=>item.kind==='override')).toBe(false);
+    expect((await getRecentRolls(room,player)).map(item=>item.requestId)).toEqual([before.requestId]);
+    await appendRoll(room,player,forced,real); // An in-flight testing roll cannot enter the restored session.
+    expect(await getSessionRolls(room,player,real.id)).toEqual(original);
+  });
   it('splits only the active session at an inclusive boundary and preserves roll contents',async()=>{
     const {room,player}=identity();const old=await ensureSession(room,player);const base=old.startedAt+1000;
     const earlier=makeRoll('d6');earlier.time=base-1;await appendRoll(room,player,earlier);

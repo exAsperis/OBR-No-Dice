@@ -1,8 +1,10 @@
 .roll-result{display:flex;align-items:center;justify-content:center;gap:7px;flex-wrap:wrap;min-width:0}
+:root{--override-red:#c93440}
 .roll-result-heading{color:var(--result-blue,#4da3ff);font-size:11px;font-weight:800;letter-spacing:.08em;overflow-wrap:anywhere}
 .roll-result-pill{display:inline-block;max-width:100%;border-radius:999px;padding:4px 12px;background:var(--result-blue,#4da3ff);color:#fff;font-size:22px;font-weight:800;line-height:1.2;white-space:pre-wrap;overflow-wrap:anywhere}
 .rarity-unusual{--rarity-color:#e4c443}.rarity-exceptional{--rarity-color:#ee913d}.rarity-extraordinary{--rarity-color:#e3535a}.rarity-legendary{--rarity-color:#5b9cff}
 .roll-result-value{display:inline-flex;flex-direction:column;align-items:center;gap:3px;max-width:100%}
+.override-indicator{display:inline-block;border:1px solid var(--override-red,#c93440);border-radius:4px;padding:2px 4px;color:var(--override-red,#c93440);font-size:9px;font-weight:900;letter-spacing:.06em}
 .roll-result-pill.rarity-border{border:2px solid var(--rarity-color);padding:2px 10px}
 .roll-result-streak{display:block;width:65%;height:2px;border-radius:999px;background:var(--rarity-color)}
 .roll-result.verified .roll-result-heading{color:var(--verified-gold,#b88722)}

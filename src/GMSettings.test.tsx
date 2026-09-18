@@ -2,11 +2,12 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { GMSettings } from './GMSettings';
 import { ROOM_SETTINGS_KEY } from './roomSettings';
+import { SESSION_KEY } from './sessionLedger';
 
-const state = vi.hoisted(() => ({ role: 'GM', saved: [] as unknown[] }));
+const state = vi.hoisted(() => ({ role: 'GM', saved: [] as unknown[], metadata:{} as Record<string,unknown> }));
 vi.mock('@owlbear-rodeo/sdk', () => ({ default: {
   player: { getRole: async () => state.role },
-  room: { setMetadata: async (metadata: unknown) => { state.saved.push(metadata); } },
+  room: { getMetadata:async()=>state.metadata, setMetadata: async (metadata: Record<string,unknown>) => { state.saved.push(metadata);Object.assign(state.metadata,metadata); } },
 } }));
 
 describe('GM settings editor', () => {
@@ -18,7 +19,7 @@ describe('GM settings editor', () => {
     view.rerender(<GMSettings settings={settings} verifiableRollsAvailable={true}/>);
     expect(screen.getByRole('status').textContent).toMatch(/Ready/);
     fireEvent.click(screen.getByLabelText('Verifiable Rolls'));
-    await waitFor(()=>expect(state.saved).toEqual([{[ROOM_SETTINGS_KEY]:{...settings,verifiableRollsEnabled:false}}]));
+    await waitFor(()=>expect(state.saved).toEqual([{[ROOM_SETTINGS_KEY]:{...settings,verifiableRollsEnabled:false,overrideMode:{enabled:false,overrides:[]}}}]));
     await waitFor(()=>expect(screen.queryByRole('status')).toBeNull());
   });
   it('saves edited fields on blur and structural shortcut changes immediately', async () => {
@@ -34,7 +35,7 @@ describe('GM settings editor', () => {
     fireEvent.change(screen.getByLabelText('Shortcut 2 name'), { target: { value: 'Coin' } });
     fireEvent.change(screen.getByLabelText('Shortcut 2 expression'), { target: { value: 'd{0,1}' } });
     fireEvent.blur(screen.getByLabelText('Shortcut 2 expression'));
-    await waitFor(() => expect(state.saved.at(-1)).toEqual({ [ROOM_SETTINGS_KEY]: { calculationSpeedMs: 0, verifiableRollsEnabled: false, shortcuts: [{ label: 'Six', term: 'd6' }, { label: 'Coin', term: 'd{0,1}' }] } }));
+    await waitFor(() => expect(state.saved.at(-1)).toEqual({ [ROOM_SETTINGS_KEY]: { calculationSpeedMs: 0, verifiableRollsEnabled: false, overrideMode:{enabled:false,overrides:[]}, shortcuts: [{ label: 'Six', term: 'd6' }, { label: 'Coin', term: 'd{0,1}' }] } }));
     expect(screen.queryByText('Save settings')).toBeNull();
   });
   it('checks the current role before writing', async () => {
@@ -53,6 +54,32 @@ describe('GM settings editor', () => {
     await screen.findByRole('alert');
     expect(state.saved).toHaveLength(0);
     expect((screen.getByLabelText('Verifiable Rolls') as HTMLInputElement).checked).toBe(false);
+    state.role='GM';
+  });
+  it('changes the shared session atomically and disables Verifiable Rolls during Override',async()=>{
+    state.saved.length=0;state.role='GM';
+    const real={id:'real',name:'Friday Game',startedAt:1};
+    state.metadata={[SESSION_KEY]:real,[ROOM_SETTINGS_KEY]:{calculationSpeedMs:500,shortcuts:[],verifiableRollsEnabled:true}};
+    render(<GMSettings settings={{calculationSpeedMs:500,shortcuts:[],verifiableRollsEnabled:true,overrideMode:{enabled:false,overrides:[]}}}/>);
+    fireEvent.click(screen.getByText('Add Override'));
+    fireEvent.change(screen.getByLabelText('Override 1 die'),{target:{value:'d20'}});
+    fireEvent.change(screen.getByLabelText('Override 1 value'),{target:{value:'20'}});
+    fireEvent.blur(screen.getByLabelText('Override 1 value'));
+    await waitFor(()=>expect(state.saved.at(-1)).toEqual(expect.objectContaining({[ROOM_SETTINGS_KEY]:expect.objectContaining({overrideMode:{enabled:false,overrides:[{die:'d20',value:20}]}})})));
+    fireEvent.click(screen.getByLabelText('Override Mode'));
+    await waitFor(()=>expect(state.saved.at(-1)).toEqual(expect.objectContaining({[SESSION_KEY]:expect.objectContaining({name:'OVERRIDE',kind:'override'}),[ROOM_SETTINGS_KEY]:expect.objectContaining({verifiableRollsEnabled:false})})));
+    expect((screen.getByLabelText('Verifiable Rolls') as HTMLInputElement).disabled).toBe(true);
+    fireEvent.click(screen.getByLabelText('Override Mode'));
+    await waitFor(()=>expect(state.saved.at(-1)).toEqual(expect.objectContaining({[SESSION_KEY]:real,[ROOM_SETTINGS_KEY]:expect.objectContaining({verifiableRollsEnabled:true})})));
+    expect((screen.getByLabelText('Verifiable Rolls') as HTMLInputElement).disabled).toBe(false);
+  });
+  it('refuses to activate Override Mode when the editor is no longer GM',async()=>{
+    state.saved.length=0;state.role='PLAYER';
+    state.metadata={[SESSION_KEY]:{id:'real',name:'Game',startedAt:1}};
+    render(<GMSettings settings={{calculationSpeedMs:500,shortcuts:[],verifiableRollsEnabled:false}}/>);
+    fireEvent.click(screen.getByLabelText('Override Mode'));
+    await screen.findByRole('alert');
+    expect(state.saved).toHaveLength(0);
     state.role='GM';
   });
 });

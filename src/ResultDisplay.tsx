@@ -33,11 +33,12 @@ export function ResultDisplay({ result, announce = false, moments = [] }: { resu
     document.addEventListener('keydown', key);
     return () => { window.removeEventListener('resize', place); document.removeEventListener('pointerdown', dismiss); document.removeEventListener('keydown', key); };
   }, [open]);
-  const verification = result.verification;
+  const verification = result.overridden ? undefined : result.verification;
   const resultTier=rarestTier(moments.filter(moment=>moment.type==='result-rarity').map(moment=>moment.tier));
   const streakTier=rarestTier(moments.filter(moment=>moment.type==='streak-rarity').map(moment=>moment.tier));
   return <div className={`roll-result${verification?.state === 'verified' ? ' verified' : ''}`} role={announce ? 'status' : undefined}>
     <span className="roll-result-heading">{result.error ? 'ERROR' : resultHeading(result.expression)}:</span>
+    {result.overridden && <span className="override-indicator">OVERRIDE</span>}
     {verification && <button ref={trigger} type="button" className={`verification-check ${verification.state}`} aria-label={verification.state === 'verified' ? 'Show verification details' : 'Show verification failure details'} aria-expanded={open} onClick={() => setOpen(value => !value)}>{verification.state === 'verified' ? '✓' : '!'}</button>}
     <span className="roll-result-value"><strong className={`roll-result-pill${resultTier==='ordinary'?'':` rarity-border rarity-${resultTier}`}`}>{result.error ?? displayValue(result.value)}</strong>{streakTier!=='ordinary'&&<span className={`roll-result-streak rarity-${streakTier}`}/>}</span>
     {result.interpretation && <span className="roll-result-interpretation">{result.interpretation}</span>}

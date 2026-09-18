@@ -38,4 +38,10 @@ describe('shared result presentation', () => {
     expect(container.querySelector('.roll-result-pill.rarity-border')).toBeNull();
     expect(container.querySelector('.roll-result-streak')).toBeNull();
   });
+  it('shows OVERRIDE instead of implying verification',()=>{
+    const {container}=render(<ResultDisplay result={{...result,overridden:true}}/>);
+    expect(screen.getByText('OVERRIDE')).not.toBeNull();
+    expect(container.querySelector('.override-indicator')).not.toBeNull();
+    expect(screen.queryByRole('button',{name:'Show verification details'})).toBeNull();
+  });
 });

@@ -6,7 +6,7 @@ import type { Dialect } from './engine/ast';
 import type { Distribution } from './engine/probability';
 import type { FairnessSnapshot } from './engine/fairness';
 import { useOwlbear } from './hooks/useOwlbear';
-import { defaultSessionName, ensureSession, getRecentRolls, getSessionRolls, localDateTime, migrationPreview, migrateHistory, parseLocalDateTime, readSharedSession, renameSession, rollbackSessionSplit, SESSION_KEY, startSession, LEDGER_CHANNEL, type DiceSession, type StoredRoll } from './sessionLedger';
+import { defaultSessionName, getRecentRolls, getSessionRolls, localDateTime, migrationPreview, migrateHistory, parseLocalDateTime, readSharedSession, renameSession, rollbackSessionSplit, SESSION_KEY, startSession, synchronizeRoomSession, LEDGER_CHANNEL, type DiceSession, type StoredRoll } from './sessionLedger';
 import { detectStaleSession, reminderKey } from './staleSession';
 import { EXTENSION_ID } from './constants';
 import { encryptForGm } from './gmCrypto';
@@ -63,6 +63,7 @@ export default function App() {
   const [busy,setBusy]=useState(false);
   const [rollingRequestId,setRollingRequestId]=useState<string|null>(null);
   const [roomSettings,setRoomSettings]=useState<RoomSettings>(DEFAULT_ROOM_SETTINGS);
+  const overrideSignature=JSON.stringify({enabled:roomSettings.overrideMode?.enabled??false,overrides:roomSettings.overrideMode?.overrides??[]});
   const [verifiableRollsAvailable,setVerifiableRollsAvailable]=useState(false);
   const verifierChannel=useRef<BroadcastChannel|null>(null);
   const pendingVerification=useRef(new Map<string,(record?:RollResult['verification'])=>void>());
@@ -140,10 +141,18 @@ export default function App() {
   },[obr.status]);
   useEffect(()=>{
     if(obr.status!=='ready'||!obr.roomId||!obr.playerId)return;
-    let active=true;const room=obr.roomId,player=obr.playerId;
-    const accept=(metadata:Record<string,unknown>)=>{const shared=readSharedSession(metadata);void ensureSession(room,player,shared).then(value=>{if(active)setSession(value);}).catch(()=>{});};
-    const unsubscribe=OBR.room.onMetadataChange(accept);
-    void OBR.room.getMetadata().then(async metadata=>{if(!active)return;const shared=readSharedSession(metadata);await migrateHistory(room,player,shared);if(active)setSession(await ensureSession(room,player,shared));}).catch(async()=>{if(active)setSession(await ensureSession(room,player));});
+    let active=true,changed=false,lastSessionId='';const room=obr.roomId,player=obr.playerId;
+    let queue=Promise.resolve();
+    const accept=(metadata:Record<string,unknown>)=>{const settings=readRoomSettings(metadata),shared=readSharedSession(metadata),previous=settings.overrideMode?.enabled?settings.overrideMode.previousSession:undefined;
+      queue=queue.catch(()=>{}).then(async()=>{await migrateHistory(room,player,previous??shared);const value=await synchronizeRoomSession(room,player,shared,previous);if(!active)return;
+        setSession(value);
+        if(lastSessionId!==value.id){lastSessionId=value.id;setChartRolls([]);setSelected(null);
+          const recent=value.kind==='override'?(await getSessionRolls(room,player,value.id)).slice(-100).map(roll=>roll.result):await getRecentRolls(room,player);
+          if(active){historyRef.current=recent;setHistory(recent);}}
+      }).catch(()=>{});
+    };
+    const unsubscribe=OBR.room.onMetadataChange(metadata=>{changed=true;accept(metadata);});
+    void OBR.room.getMetadata().then(metadata=>{if(active&&!changed)accept(metadata);}).catch(()=>{if(active&&!changed)accept({});});
     return()=>{active=false;unsubscribe();};
   },[obr.status,obr.roomId,obr.playerId,obr.role]);
   useEffect(()=>{
@@ -198,7 +207,6 @@ export default function App() {
     return ()=>{cancelAnimationFrame(frame);observer.disconnect();};
   },[preferencesReady,obr.roomId,obr.playerId]);
   const add=(result:RollResult)=>{ if(historyRef.current.some(x=>x.requestId===result.requestId)) return; const next=[...historyRef.current,result].slice(-100); historyRef.current=next; setHistory(next); if(!result.error&&result.expression===currentInput.current.expression&&result.dialect===currentInput.current.dialect)setChartRolls(previous=>[...previous,result.value]); };
-  useEffect(()=>{if(!obr.roomId||!obr.playerId)return;let active=true;void migrateHistory(obr.roomId,obr.playerId).then(()=>getRecentRolls(obr.roomId!,obr.playerId!)).then(stored=>{if(active){historyRef.current=stored;setHistory(stored);}}).catch(()=>{});return()=>{active=false;};},[obr.roomId,obr.playerId]);
   useEffect(()=>{
     if(!obr.roomId||!obr.playerId)return;
     const channel=new BroadcastChannel(LOCAL_CHANNEL);revealChannel.current=channel;
@@ -252,6 +260,10 @@ export default function App() {
     return ()=>window.clearTimeout(t);
   },[expression,dialectHint]);
   useEffect(()=>{
+    const previous=fairnessId.current++;fairnessWorker.current?.postMessage({type:'stop',id:previous});
+    setFairness(null);setFairnessRunning(false);setFairnessError('');
+  },[overrideSignature]);
+  useEffect(()=>{
     if(obr.status!=='ready'||!obr.playerId)return;
     const requestOff=OBR.broadcast.onMessage(REQUEST_CHANNEL,event=>{ if(obr.role==='GM'&&isRequest(event.data)&&event.data.expression.length<=1000&&event.data.visibility!=='gm') void perform(event.data,false); });
     return ()=>{requestOff();};
@@ -260,13 +272,20 @@ export default function App() {
   },[obr.status,obr.playerId,obr.playerName,obr.role]);
   async function perform(req:RollRequest,local:boolean) {
     setBusy(true);
+    let overrideActive=false;
     try {
+      const metadata=await OBR.room.getMetadata();
+      const currentSettings=readRoomSettings(metadata),shared=readSharedSession(metadata);
+      const overridden=currentSettings.overrideMode?.enabled===true;
+      overrideActive=overridden;
+      if(overridden!==(shared?.kind==='override')||(overridden&&shared?.id!==currentSettings.overrideMode?.overrideSession?.id))throw new Error('Override Mode is updating. Try again.');
       const v=req.visibility??'everyone';
       const input={
         requestId:req.requestId,expression:req.expression,dialect:req.dialect,visibility:v,
         playerId:obr.playerId??'',playerName:obr.playerName??'Player',label:req.label,source:req.source,
+        overridden,overrides:overridden?currentSettings.overrideMode?.overrides:undefined,
       };
-      const verification=local&&roomSettings.verifiableRollsEnabled&&obr.roomId&&obr.playerId&&verifierChannel.current
+      const verification=local&&!overridden&&currentSettings.verifiableRollsEnabled&&obr.roomId&&obr.playerId&&verifierChannel.current
         ? await new Promise<RollResult['verification']|undefined>(resolve=>{
           const timeout=setTimeout(()=>{pendingVerification.current.delete(req.requestId);resolve({state:'failed',reason:'Verification service did not respond',rollId:req.requestId,protocol:VERIFY_VERSION,canonicalExpression:req.expression,rollerConnectionId:'',peerConnectionId:''});},15000);
           pendingVerification.current.set(req.requestId,record=>{clearTimeout(timeout);resolve(record);});
@@ -277,6 +296,8 @@ export default function App() {
         ? {record:{version:1 as const,requestId:req.requestId,expression:req.expression,dialect:req.dialect??'nodice' as Dialect,visibility:v,playerId:input.playerId,playerName:input.playerName,value:'' as const,trace:[],time:Date.now(),error:'Verification failed',verification:verified.verification}}
         : rollExpression(input,verified?.rng);
       if(verified?.verification?.state==='verified')result.verification=verified.verification;
+      const latest=await OBR.room.getMetadata();
+      if(readSharedSession(latest)?.id!==shared?.id||Boolean(readRoomSettings(latest).overrideMode?.enabled)!==overridden)throw new Error('Room mode changed during the roll. Try again.');
       const d=result.dialect;
       if(local&&req.expression===currentInput.current.expression)currentInput.current.dialect=d;
       if(v==='everyone') await OBR.broadcast.sendMessage(RESULT_CHANNEL,result);
@@ -289,7 +310,7 @@ export default function App() {
       const message=error instanceof Error?error.message:'Roll failed';
       if(local){setInputError(message);setRollingRequestId(current=>current===req.requestId?null:current);}
       else if((req.visibility??'everyone')==='everyone') {
-        const failed:RollResult={version:1,requestId:req.requestId,expression:req.expression,dialect:req.dialect??'nodice',visibility:'everyone',playerId:obr.playerId??'',playerName:obr.playerName??'Player',value:'',trace:[],time:Date.now(),error:message,source:req.source,label:req.label};
+        const failed:RollResult={version:1,requestId:req.requestId,expression:req.expression,dialect:req.dialect??'nodice',visibility:'everyone',playerId:obr.playerId??'',playerName:obr.playerName??'Player',value:'',trace:[],time:Date.now(),error:message,source:req.source,label:req.label,overridden:overrideActive||undefined};
         await OBR.broadcast.sendMessage(RESULT_CHANNEL,failed).catch(()=>{});
       }
     }
@@ -312,7 +333,7 @@ export default function App() {
     if(fairnessRunning){fairnessWorker.current?.postMessage({type:'stop',id:fairnessId.current});setFairnessRunning(false);return;}
     const id=++fairnessId.current;
     setFairness(null);setFairnessError('');setFairnessRunning(true);
-    fairnessWorker.current?.postMessage({type:'start',id,expression,dialect:dialectHint});
+    fairnessWorker.current?.postMessage({type:'start',id,expression,dialect:dialectHint,overrides:roomSettings.overrideMode?.enabled?roomSettings.overrideMode.overrides:[]});
   }
   useEffect(()=>{
     if(!collapsed.history||!historyPreviewRef.current)return;
@@ -345,13 +366,13 @@ export default function App() {
   const stale=detectStaleSession(session,sessionRolls,obr.role==='GM');
   const suppressionKey=`${EXTENSION_ID}/stale-dismissed/${obr.roomId??''}/${obr.playerId??''}`;
   const isSuppressed=(key:string)=>{try{return (JSON.parse(sessionStorage.getItem(suppressionKey)??'[]') as string[]).includes(key);}catch{return false;}};
-  const showReminder=stale&&reminderKey(stale)!==dismissedReminder&&!isSuppressed(reminderKey(stale));
+  const showReminder=!roomSettings.overrideMode?.enabled&&stale&&reminderKey(stale)!==dismissedReminder&&!isSuppressed(reminderKey(stale));
   const continueSession=()=>{if(!stale)return;const key=reminderKey(stale);setDismissedReminder(key);try{const previous=JSON.parse(sessionStorage.getItem(suppressionKey)??'[]') as string[];sessionStorage.setItem(suppressionKey,JSON.stringify([...previous.filter(item=>item!==key),key].slice(-20)));}catch{/* In-memory dismissal still works. */}};
   const selectedStart=parseLocalDateTime(sessionStart);
   const startError=sessionDialog==='new'&&session&&(!Number.isFinite(selectedStart)?'Enter a valid local Session Start time.':selectedStart<session.startedAt?'Session Start cannot be earlier than the beginning of the current session.':'');
   const preview=migrationPreview(sessionRolls,selectedStart);
   const openNewSession=(start?:number)=>{setSessionName(defaultSessionName());setSessionStart(localDateTime(new Date(start??Date.now()),true));setSessionError('');setSessionDialog('new');};
-  const saveSession=async()=>{if(obr.role!=='GM'||!obr.roomId||!obr.playerId||!sessionName.trim()||!sessionDialog||startError||(sessionDialog==='new'&&!sessionRollsLoaded))return;setSessionError('');let created:DiceSession|undefined;try{const next=sessionDialog==='new'?await startSession(obr.roomId,obr.playerId,sessionName,selectedStart,preview.count):await renameSession(obr.roomId,obr.playerId,sessionName);if(sessionDialog==='new')created=next;await OBR.room.setMetadata({[SESSION_KEY]:next});setSession(next);setSessionDialog(null);setSessionRolls([]);}catch(error){if(created&&session)try{await rollbackSessionSplit(obr.roomId,obr.playerId,session,created);}catch{setSessionError('The room update failed and the local session could not be restored. Reopen No Dice to synchronize.');return;}setSessionError(error instanceof Error?error.message:'Could not save the session.');if(session)void getSessionRolls(obr.roomId,obr.playerId,session.id).then(setSessionRolls).catch(()=>{});}};
+  const saveSession=async()=>{if(roomSettings.overrideMode?.enabled||obr.role!=='GM'||!obr.roomId||!obr.playerId||!sessionName.trim()||!sessionDialog||startError||(sessionDialog==='new'&&!sessionRollsLoaded))return;setSessionError('');let created:DiceSession|undefined;try{if(readRoomSettings(await OBR.room.getMetadata()).overrideMode?.enabled)throw new Error('Override Mode is active.');const next=sessionDialog==='new'?await startSession(obr.roomId,obr.playerId,sessionName,selectedStart,preview.count):await renameSession(obr.roomId,obr.playerId,sessionName);if(sessionDialog==='new')created=next;await OBR.room.setMetadata({[SESSION_KEY]:next});setSession(next);setSessionDialog(null);setSessionRolls([]);}catch(error){if(created&&session)try{await rollbackSessionSplit(obr.roomId,obr.playerId,session,created);}catch{setSessionError('The room update failed and the local session could not be restored. Reopen No Dice to synchronize.');return;}setSessionError(error instanceof Error?error.message:'Could not save the session.');if(session)void getSessionRolls(obr.roomId,obr.playerId,session.id).then(setSessionRolls).catch(()=>{});}};
   const toggle=(section:'distribution'|'recent'|'history')=>setCollapsed(previous=>({...previous,[section]:!previous[section]}));
   const entry=(item:RollResult,isRecent=false)=><article className="entry" key={item.requestId} ref={isRecent?recentCardRef:undefined}>
     <div className="entry-meta"><strong>{item.playerName}</strong><span className="entry-meta-right"><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
@@ -360,35 +381,35 @@ export default function App() {
     <details className="work-details" open={isRecent?showWorkOpen:undefined} onToggle={isRecent?event=>{const open=event.currentTarget.open;setShowWorkOpen(open);if(obr.roomId&&obr.playerId)saveShowWork(obr.roomId,obr.playerId,open);}:undefined}><summary>Show work</summary><div className="work-rows">{ledgerWorkRows(item).map((row,i)=><div className="work-row" key={i}><span className="work-die">{row.die}</span><span className="work-expression">{row.expression}{row.drawIndices?.map(index=>{const draw=item.resolution?.dice[index];const moment=momentsByRollId.get(item.requestId)?.find(moment=>moment.type==='die-rarity'&&moment.drawIndex===index);return draw&&moment?<span key={index} className={`work-draw rarity-${moment.tier}`} title={moment.label}>{String(draw.face)}</span>:null;})}</span></div>)}</div></details>
     <ResultDisplay result={item} moments={momentsByRollId.get(item.requestId)??[]}/>
   </article>;
-  return <main className="no-dice" ref={panelRef}>
+  return <main className={`no-dice${roomSettings.overrideMode?.enabled?' override-active':''}`} ref={panelRef}>
     <header className="panel-title" onPointerDown={event=>{if((event.target as HTMLElement).closest('button,a'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)sendPanel({type:'move',dx,dy});}}} onPointerCancel={()=>{dragStart.current=null;}}>
       <div className="header-brand"><img className="header-icon" src="./icon.svg" alt="" aria-hidden="true"/><h1>No<br/>Dice</h1><span className="version">v{RELEASE_VERSION}</span></div><div className="panel-title-actions"><button type="button" className={`header-action fairness-toggle${fairnessRunning?' running':''}`} onClick={toggleFairness} disabled={!expression.trim()} aria-label={fairnessRunning?'Stop fairness calculation':'Calculate fairness'} aria-pressed={fairnessRunning} title={fairnessRunning?'Stop fairness calculation':'Calculate fairness'}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M12 3v17M5 6h14M3 20h18M7 6l-4 8h8L7 6Zm10 0-4 8h8l-4-8Z"/></svg></button>{obr.role==='GM'&&<button type="button" className="settings-toggle header-action" aria-label="GM settings" aria-expanded={settingsOpen} title="GM settings" onClick={()=>setSettingsOpen(value=>!value)}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9.7 3.4 10.3 2h3.4l.6 1.4 1.7.7 1.4-.6 2.4 2.4-.6 1.4.7 1.7 1.4.6v3.4l-1.4.6-.7 1.7.6 1.4-2.4 2.4-1.4-.6-1.7.7-.6 1.4h-3.4l-.6-1.4-1.7-.7-1.4.6-2.4-2.4.6-1.4-.7-1.7L2 13.7v-3.4l1.4-.6.7-1.7-.6-1.4 2.4-2.4 1.4.6 1.7-.7Z"/><circle cx="12" cy="12" r="3"/></svg></button>}</div>
       <div className="panel-title-actions secondary-actions"><a className="header-action help-button" aria-label="No Dice help" title="No Dice help" href="https://no-dice.ex-asperis.com" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9.2 9a3 3 0 1 1 5.2 2c-1.5 1.2-2.4 1.7-2.4 3"/><circle cx="12" cy="17.5" r="1" fill="currentColor" stroke="none"/></svg></a><button type="button" className="header-action panel-close" aria-label="Close panel" title="Close panel" onClick={()=>sendPanel({type:'close'})}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     </header>
     {obr.role==='GM'&&settingsOpen&&<GMSettings settings={roomSettings} verifiableRollsAvailable={verifiableRollsAvailable}/>}
-    <section className="session-strip"><span>Session: <strong>{session?.name??'Loading…'}</strong>{showReminder&&' ⚠'}</span><div><button type="button" onClick={()=>sendPanel({type:'statistics'})}>Statistics</button>{obr.role==='GM'&&<><button type="button" onClick={()=>{setSessionName(session?.name??'');setSessionDialog('rename');}}>Rename</button><button type="button" onClick={()=>openNewSession()}>New Session</button></>}</div></section>
+    <section className={`session-strip${roomSettings.overrideMode?.enabled?' override-active':''}`}><span>Session: <strong>{roomSettings.overrideMode?.enabled?'OVERRIDE':session?.name??'Loading…'}</strong>{showReminder&&' ⚠'}</span><div><button type="button" onClick={()=>sendPanel({type:'statistics'})}>Statistics</button>{obr.role==='GM'&&!roomSettings.overrideMode?.enabled&&<><button type="button" onClick={()=>{setSessionName(session?.name??'');setSessionDialog('rename');}}>Rename</button><button type="button" onClick={()=>openNewSession()}>New Session</button></>}</div></section>
     {showReminder&&<aside className="stale-reminder" aria-label="Session reminder"><strong>Still using "{session?.name}"?</strong><p>{stale.resumedAt?`New activity began at ${new Date(stale.resumedAt).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})} after ${Math.floor((stale.resumedAt-stale.lastOldRoll)/3600000)} hours of inactivity.`:`No rolls have been recorded for ${Math.floor((Date.now()-stale.lastOldRoll)/3600000)} hours.`}</p><div><button type="button" onClick={()=>openNewSession(stale.resumedAt||undefined)}>New Session</button><button type="button" onClick={continueSession}>Continue Session</button></div></aside>}
     {sessionDialog&&<div className="session-dialog-backdrop"><form className="session-dialog" onSubmit={event=>{event.preventDefault();void saveSession();}}><h2>{sessionDialog==='new'?'New Session':'Rename Session'}</h2><label htmlFor="session-name">Session name</label><input id="session-name" value={sessionName} onChange={event=>setSessionName(event.target.value)} autoFocus maxLength={100}/>{sessionDialog==='new'&&<><label htmlFor="session-start">Session Start</label><input id="session-start" type="datetime-local" step="0.001" value={sessionStart} onChange={event=>setSessionStart(event.target.value)}/>{startError?<p className="session-error" role="alert">{startError}</p>:!sessionRollsLoaded?<p className="session-preview">Loading current session rolls…</p>:<p className="session-preview">{preview.count===0?'Creating this session will move 0 rolls from the current session.':<>{preview.count} rolls by {preview.rollers} players will move from "{session?.name}" into the new session.<br/>First moved roll: {new Date(preview.first!).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}<br/>Last moved roll: {new Date(preview.last!).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</>}</p>}</>}{sessionError&&<p className="session-error" role="alert">{sessionError}</p>}<div><button type="button" onClick={()=>setSessionDialog(null)}>Cancel</button><button type="submit" disabled={Boolean(startError)||(sessionDialog==='new'&&!sessionRollsLoaded)}>Save</button></div></form></div>}
     <section className="probability" aria-label="Probability distribution">
       <button type="button" className="section-heading section-toggle distribution-heading" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.distribution?'▸':'▾'}</span><strong>Distribution</strong></span><span className="distribution-stats" aria-label={chart?`Range ${chart.range?chart.range.join(' to '):chart.entries.length+' outcomes'}, mean ${chart.mean?.toFixed(2)??'unavailable'}, standard deviation ${chart.standardDeviation?.toFixed(2)??'unavailable'}, mode ${display(chart.mode??'—')}`:'Range, mean, standard deviation, and mode unavailable'}><span>{chart?.range?`Range ${chart.range[0]}–${chart.range[1]}`:chart?`${chart.entries.length} outcomes`:'Range —'}</span><span>Mean {chart?.mean?.toFixed(2)??'—'}</span><span>SD {chart?.standardDeviation?.toFixed(2)??'—'}</span><span>Mode {chart?display(chart.mode??'—'):'—'}</span></span><span className="distribution-method">{chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
       {!collapsed.distribution&&<>
-        <div className={`bars${chart ? '' : ' distribution-placeholder'}`} role={chart ? 'img' : undefined} aria-label={chart ? 'Probability mass chart with roll history and fairness overlay' : undefined} aria-hidden={chart ? undefined : true}>{chart?.entries.slice(0,MAX_VISIBLE_BARS).map((item,i)=>{const key=JSON.stringify(item.value),observed=fairCounts.get(key)??0,historic=historicCounts.get(key)??0,rate=fairness?.total?observed/fairness.total:0;const actual=selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(item.value);return <div className={`bar-cell${actual?' actual':''}${actual&&selected.verification?.state==='verified'?' verified':''}`} key={i} title={chartBarTooltip(display(item.value),item.probability,fairnessRunning||fairness?rate:undefined,chartTails[i])}><div className="bar-pair"><div className="bar" style={{height:Math.max(3,item.probability/max*100)+'%'}}/>{fairness&&<div className="bar observed" style={{height:observed?Math.max(3,rate/max*100)+'%':'0'}}/>}</div>{historic>0&&<span className="history-mark">{historic}</span>}<small>{display(item.value)}</small></div>;})}</div>
+        <div className={`bars${chart ? '' : ' distribution-placeholder'}`} role={chart ? 'img' : undefined} aria-label={chart ? 'Probability mass chart with roll history and fairness overlay' : undefined} aria-hidden={chart ? undefined : true}>{chart?.entries.slice(0,MAX_VISIBLE_BARS).map((item,i)=>{const key=JSON.stringify(item.value),observed=fairCounts.get(key)??0,historic=historicCounts.get(key)??0,rate=fairness?.total?observed/fairness.total:0;const actual=selected?.expression===expression&&selected.dialect===detectedDialect&&display(selected.value)===display(item.value);return <div className={`bar-cell${actual?' actual':''}${actual&&!selected.overridden&&selected.verification?.state==='verified'?' verified':''}`} key={i} title={chartBarTooltip(display(item.value),item.probability,fairnessRunning||fairness?rate:undefined,chartTails[i])}><div className="bar-pair"><div className="bar" style={{height:Math.max(3,item.probability/max*100)+'%'}}/>{fairness&&<div className="bar observed" style={{height:observed?Math.max(3,rate/max*100)+'%':'0'}}/>}</div>{historic>0&&<span className="history-mark">{historic}</span>}<small>{display(item.value)}</small></div>;})}</div>
         {fairness&&<div className="fairness-controls"><span className="fairness-legend"><i aria-hidden="true"/> Observed · {fairness.total.toLocaleString()} rolls{fairness.total>shownFair?' · '+(fairness.total-shownFair).toLocaleString()+' outside visible chart':''}</span><button type="button" className="fairness-reset" onClick={resetFairness} aria-label="Reset observed fairness results">Reset</button></div>}
         {fairnessError&&<div className="input-error" role="alert">{fairnessError}</div>}
       </>}
     </section>
-    <form className={`composer${roomSettings.verifiableRollsEnabled&&verifiableRollsAvailable?' verifiable-available':''}`} onSubmit={e=>{e.preventDefault();submit();}}>
+    <form className={`composer${roomSettings.verifiableRollsEnabled&&verifiableRollsAvailable?' verifiable-available':''}${roomSettings.overrideMode?.enabled?' override-active':''}`} onSubmit={e=>{e.preventDefault();submit();}}>
       <div className="composer-heading"><label htmlFor="expression">Expression</label>{notation&&<NotationPopover expression={expression} notation={notation}/>}</div>
       <div className="expression-row"><div className={`expression-field${expression?' has-expression':''}`}><textarea id="expression" ref={inputRef} rows={1} autoComplete="off" spellCheck={false} value={expression} onChange={e=>{currentInput.current.expression=e.target.value;setExpression(e.target.value);setDialectHint(undefined);setSelected(null);setInputError('');}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();if(!busy&&expression.trim())submit();}}} placeholder="Enter expression" title="Enter to roll; Shift+Enter for a new line" aria-describedby={inputError||chartError?'input-error':undefined}/><button type="button" className="clear-expression" disabled={!expression} onClick={()=>{currentInput.current.expression='';setExpression('');setDialectHint(undefined);setSelected(null);setInputError('');inputRef.current?.focus();}} aria-label="Clear expression">Clear</button></div><select aria-label="Roll audience" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">All</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" className="roll-button" disabled={busy||!expression.trim()}>Roll</button></div>
       {inputError&&<div id="input-error" className="input-error" role="alert">{inputError}</div>}
       {!inputError&&chartError&&<div id="input-error" className="input-error" role="status">{chartError}</div>}
     </form>
     <section className="recent-section" aria-label="Most recent result">
-      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.recent?'▸':'▾'}</span><strong>Most Recent Result</strong></span>{collapsed.recent&&recent&&<span className="collapsed-recent-result"><span className="collapsed-recent-content">{recent.verification&&<span className={`verification-preview ${recent.verification.state}`}>{recent.verification.state==='verified'?'✓':'⚠'}</span>}<span className={`collapsed-output${recent.error?' error':''}`}>{recent.error??display(recent.value)}</span><span className="collapsed-recent-player" title={recent.playerName}>({recent.playerName})</span></span></span>}</button>
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.recent?'▸':'▾'}</span><strong>Most Recent Result</strong></span>{collapsed.recent&&recent&&<span className="collapsed-recent-result"><span className="collapsed-recent-content">{recent.overridden?<span className="verification-preview override-indicator">OVERRIDE</span>:recent.verification&&<span className={`verification-preview ${recent.verification.state}`}>{recent.verification.state==='verified'?'✓':'⚠'}</span>}<span className={`collapsed-output${recent.error?' error':''}`}>{recent.error??display(recent.value)}</span><span className="collapsed-recent-player" title={recent.playerName}>({recent.playerName})</span></span></span>}</button>
       {!collapsed.recent&&(rollingRequestId?<article className="entry rolling-entry" role="status" style={rollingCardHeight?{height:rollingCardHeight,minHeight:rollingCardHeight}:undefined}>Rolling . . .</article>:recent?entry(recent,true):<div className="empty">No rolls yet.</div>)}
     </section>
     <section className="ledger" aria-label="Roll history">
-      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.history} onClick={()=>toggle('history')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.history?'▸':'▾'}</span><strong>History</strong></span>{collapsed.history&&<span className="collapsed-history" ref={historyPreviewRef}>{older.map((item,index)=><span className="collapsed-history-result" key={item.requestId} style={{visibility:index<historyPreviewCount?'visible':'hidden'}} aria-hidden={index>=historyPreviewCount}>{item.verification&&<span className={`verification-preview ${item.verification.state}`}>{item.verification.state==='verified'?'✓':'⚠'} </span>}{item.error??display(item.value)}</span>)}</span>}</button>
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.history} onClick={()=>toggle('history')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.history?'▸':'▾'}</span><strong>History</strong></span>{collapsed.history&&<span className="collapsed-history" ref={historyPreviewRef}>{older.map((item,index)=><span className="collapsed-history-result" key={item.requestId} style={{visibility:index<historyPreviewCount?'visible':'hidden'}} aria-hidden={index>=historyPreviewCount}>{item.overridden?<span className="verification-preview override-indicator">OVERRIDE </span>:item.verification&&<span className={`verification-preview ${item.verification.state}`}>{item.verification.state==='verified'?'✓':'⚠'} </span>}{item.error??display(item.value)}</span>)}</span>}</button>
       {!collapsed.history&&(older.length?older.map(item=>entry(item)):<div className="empty">No earlier rolls.</div>)}
     </section>
   </main>;

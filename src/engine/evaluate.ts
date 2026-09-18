@@ -5,6 +5,7 @@ import { PresentationRecorder } from './presentation';
 import { matchesInterpretation } from './interpretation';
 
 export interface Rng { integer(maxExclusive:number):number }
+export interface EvaluationOptions { dieOverride?: (context:{node:Extract<Node,{kind:'dice'}>;faceCount:number})=>number|undefined }
 export const cryptoRng:Rng={integer(maxExclusive){
   if(!Number.isSafeInteger(maxExclusive)||maxExclusive<1||maxExclusive>0x100000000)throw new Error('Invalid random range');
   const limit=Math.floor(0x100000000/maxExclusive)*maxExclusive;
@@ -18,7 +19,7 @@ export interface Evaluation {value:Value;trace:string[];stages:string[];stageDic
 type Context='scalar'|'pool-source';
 /** One budget follows the entire roll, including dynamic parameters and nested facets. */
 export const MAX_ROLL_STEPS=20000;
-interface RollBudget { steps:number; depth:number; dice:DieDraw[] }
+interface RollBudget { steps:number; depth:number; dice:DieDraw[]; options?:EvaluationOptions }
 function spend(budget:RollBudget):void{
   if(++budget.steps>MAX_ROLL_STEPS)throw new ExpressionError(`Roll exceeded the ${MAX_ROLL_STEPS}-step safety limit. Check for a non-terminating explosion or reroll.`);
 }
@@ -63,17 +64,18 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       const sides=node.die.kind==='standard-die'?evaluateNode(node.die.sides,rng,'scalar',plan,presentation,showStages,budget,true):undefined;
       const faceCount=node.die.kind==='custom-die'?node.die.facets.length:positiveInteger(sides!.value,'Die size',1000);
       if(!faceCount)throw new ExpressionError('A die must have at least one facet');
+      const chooseIndex=()=>{const forced=budget.options?.dieOverride?.({node,faceCount});if(forced===undefined)return rng.integer(faceCount);if(!Number.isInteger(forced)||forced<0||forced>=faceCount)throw new ExpressionError('Override value is not a legal die face');return forced;};
       const results:Facet[]=[];const trace=[...quantity.trace,...(sides?.trace??[])];
       // Select all initial custom facets before evaluating their expressions.
       // This makes each facet's nested rolls visible in left-to-right order.
       const customFacets=node.die.kind==='custom-die'?node.die.facets:undefined;
-      const selected=customFacets?Array.from({length:count},()=>{spend(budget);return rng.integer(faceCount);}):undefined;
+      const selected=customFacets?Array.from({length:count},()=>{spend(budget);return chooseIndex();}):undefined;
       const selectedLabels=selected?.map(index=>formatFacetShort(customFacets![index]));
       if(selectedLabels&&showStages){presentation.replace(node,show(selectedLabels));presentation.show(formatShort(node));}
       let drawKind:DieDraw['kind']='initial', dieIndex=0;
       const draw=(preselected?:number):{value:Facet;explosion?:Explosion;facetReroll?:Explosion;index:number}=>{
         if(preselected===undefined)spend(budget);
-        const index=preselected??rng.integer(faceCount);
+        const index=preselected??chooseIndex();
         if(node.die.kind==='standard-die'){budget.dice.push({die:formatShort(node),dieIndex,face:index+1,kind:drawKind,nodeSpan:node.span,facetIndex:index});return {value:index+1,index,explosion:index+1===faceCount?node.die.explodeHighest:undefined,facetReroll:index===0?node.die.rerollLowest:undefined};}
         const facet=node.die.facets[index];
         if(facet.kind==='value'){budget.dice.push({die:formatShort(node),dieIndex,face:facet.value,kind:drawKind,nodeSpan:node.span,facetIndex:index});return {value:facet.value,index,explosion:facet.explosion,facetReroll:facet.facetReroll};}
@@ -162,5 +164,5 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
     }
   }
 }
-export function evaluate(node:Node,rng:Rng=cryptoRng,recordStages=true):Evaluation{const presentation=new PresentationRecorder(node,recordStages);const budget:RollBudget={steps:0,depth:0,dice:[]};const result=evaluateNode(node,rng,'scalar',resolveSemantics(node),presentation,recordStages,budget);return {...result,stageDice:presentation.stageDice,stageDrawIndices:presentation.stageDrawIndices,dice:budget.dice};}
+export function evaluate(node:Node,rng:Rng=cryptoRng,recordStages=true,options?:EvaluationOptions):Evaluation{const presentation=new PresentationRecorder(node,recordStages);const budget:RollBudget={steps:0,depth:0,dice:[],options};const result=evaluateNode(node,rng,'scalar',resolveSemantics(node),presentation,recordStages,budget);return {...result,stageDice:presentation.stageDice,stageDrawIndices:presentation.stageDrawIndices,dice:budget.dice};}
 export const roll=evaluate;

@@ -2,7 +2,8 @@ import OBR from '@owlbear-rodeo/sdk';
 import { StrictMode, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { applyOwlbearTheme } from './theme';
-import { getSessionRolls, LEDGER_CHANNEL, listSessions, migrateHistory, readSharedSession, type DiceSession, type StoredRoll } from './sessionLedger';
+import { getSessionRolls, LEDGER_CHANNEL, listSessions, migrateHistory, readSharedSession, synchronizeRoomSession, type DiceSession, type StoredRoll } from './sessionLedger';
+import { readRoomSettings } from './roomSettings';
 import { filterRolls, expressionStats, playerStats } from './analytics';
 import { AnalyticsTabs, tabs, type AnalyticsTab } from './AnalyticsTabs';
 import { EXTENSION_ID } from './constants';
@@ -39,7 +40,9 @@ function Statistics(){
       const room=OBR.room.id,player=OBR.player.id;
       setIdentity({room,player});
       try{applyOwlbearTheme(await OBR.theme.getTheme());offTheme=OBR.theme.onChange(applyOwlbearTheme);}catch{/* CSS fallback */}
-      const refresh=async()=>{const shared=readSharedSession(await OBR.room.getMetadata());await migrateHistory(room,player,shared);const all=await listSessions(room,player);if(active){setSessions(all);setSelected(value=>value||all.find(s=>!s.endedAt)?.id||all[0]?.id||'');}};
+      const refresh=async()=>{const metadata=await OBR.room.getMetadata(),settings=readRoomSettings(metadata),shared=readSharedSession(metadata),previous=settings.overrideMode?.enabled?settings.overrideMode.previousSession:undefined;
+        await migrateHistory(room,player,previous??shared);await synchronizeRoomSession(room,player,shared,previous);
+        const all=await listSessions(room,player);if(active){setSessions(all);setSelected(value=>all.some(item=>item.id===value)&&!(shared?.kind==='override'&&value!==shared.id)?value:shared?.id??all.find(s=>!s.endedAt)?.id??all[0]?.id??'');}};
       await refresh().catch(()=>{});
       offMetadata=OBR.room.onMetadataChange(()=>{void refresh().catch(()=>{});});
     });

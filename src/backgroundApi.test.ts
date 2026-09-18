@@ -4,14 +4,18 @@ import { NO_DICE_API_REQUEST, NO_DICE_API_RESPONSE } from './noDiceApi';
 import { RESULT_CHANNEL, type RollResult } from './protocol';
 import { getRecentRolls } from './sessionLedger';
 import { LOCAL_CHANNEL } from './revealProtocol';
+import { overrideMetadata, overrideTransition } from './overrideMode';
+import { ROOM_SETTINGS_KEY, DEFAULT_ROOM_SETTINGS } from './roomSettings';
+import { SESSION_KEY } from './sessionLedger';
 
 const state = vi.hoisted(() => ({
   listeners: new Map<string, Array<(event: { data: unknown; connectionId: string }) => void>>(),
   sent: [] as Array<{ channel: string; data: unknown; options: unknown }>,
+  metadata: {} as Record<string,unknown>,
 }));
 vi.mock('@owlbear-rodeo/sdk', () => ({ default: {
   onReady: (callback: () => Promise<void>) => { void callback(); },
-  room: { id: 'room' }, player: { id: 'player', getRole: async () => 'PLAYER', getName: async () => 'Bryan' },
+  room: { id: 'room', getMetadata:async()=>state.metadata }, player: { id: 'player', getRole: async () => 'PLAYER', getName: async () => 'Bryan' },
   viewport: { getWidth: async () => 1200, getHeight: async () => 800 },
   popover: { open: async () => {}, close: async () => {} },
   broadcast: {
@@ -48,6 +52,11 @@ describe('background API registration', () => {
     const recorded = state.sent.find(item => item.channel === RESULT_CHANNEL)!.data as RollResult;
     LocalChannel.instances.find(item => item.name === LOCAL_CHANNEL)!.onmessage?.({ data: { type: 'revealed', roomId: 'room', playerId: 'player', result: recorded } });
     await vi.waitFor(async () => expect((await getRecentRolls('room', 'player')).map(item => item.requestId)).toContain('recorded'));
+    state.metadata=overrideMetadata(overrideTransition({[ROOM_SETTINGS_KEY]:DEFAULT_ROOM_SETTINGS,[SESSION_KEY]:{id:'real',name:'Game',startedAt:1}},[{die:'d20',value:20}],true));
+    listener({data:{protocolVersion:1,type:'roll',requestId:'forced',expression:'d20',options:{record:false}},connectionId:'local'});
+    await vi.waitFor(()=>expect(state.sent.some(item=>item.channel===NO_DICE_API_RESPONSE&&(item.data as {requestId?:string}).requestId==='forced')).toBe(true));
+    expect(state.sent.find(item=>item.channel===NO_DICE_API_RESPONSE&&(item.data as {requestId?:string}).requestId==='forced')?.data)
+      .toMatchObject({ok:true,result:{kind:'number',value:20}});
     vi.unstubAllGlobals();
   });
 });
