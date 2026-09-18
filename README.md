@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.25.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.26.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -178,6 +178,8 @@ The Help and Close header controls use consistent 24 × 24 pixel vector icons at
 Version 0.22.1 shows the collapsed Most Recent Result value in a compact notification-blue pill with white text; the verification mark remains outside the pill. This visual fix does not change roll results or the external API.
 
 Version 0.22.2 positions that pill outside the header's text flow, allowing a larger value without increasing the header row height or moving it to the right. The expression editor now fills the space previously occupied by its separate Clear button; Clear appears inside the first line on hover or keyboard focus.
+
+Version 0.26.0 adds extensible Query shortcuts: PbtA, PbtA 10+, Nat 20, Nat 1, Snake Eyes, and Boxcars. Query now has independent final Result and individual Roll filters, including an optional die type, so natural d20 faces are matched even when the final result has modifiers. Results and Dice still select the displayed outcome distribution. This is a compatible feature release; the roll ledger and broadcast API formats are unchanged.
 
 Version 0.25.0 expands Session Statistics into Overview, Players, Expressions, Outcomes, Highlights, Timeline, Query, and Fairness tabs. Shared player and expression filters apply across views. Numeric roll percentiles use the exact theoretical distribution's discrete midpoint, P(X < result) + P(X = result)/2; unsupported or nonnumeric results are excluded. This is a compatible feature release. The roll ledger and broadcast API formats are unchanged. Fairness comparisons describe observed samples without a verdict.
 
