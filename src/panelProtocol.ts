@@ -13,6 +13,7 @@ export type PanelCommand =
   | { type: 'ready' }
   | { type: 'focus' }
   | { type: 'close' }
+  | { type: 'statistics' }
   | { type: 'move'; dx: number; dy: number }
   | { type: 'resize'; height: number };
 export type PanelMessage = { roomId: string; playerId: string } & PanelCommand;
@@ -21,7 +22,7 @@ export function isPanelMessage(value: unknown): value is PanelMessage {
   if (!value || typeof value !== 'object') return false;
   const message = value as Partial<PanelMessage>;
   return typeof message.roomId === 'string' && typeof message.playerId === 'string'
-    && (message.type === 'open' || message.type === 'toggle' || message.type === 'state-request' || (message.type === 'state' && typeof message.open === 'boolean') || message.type === 'ready' || message.type === 'focus' || message.type === 'close'
+    && (message.type === 'open' || message.type === 'toggle' || message.type === 'state-request' || (message.type === 'state' && typeof message.open === 'boolean') || message.type === 'ready' || message.type === 'focus' || message.type === 'close' || message.type === 'statistics'
       || ((message.type === 'shortcut' || message.type === 'apply-shortcut') && typeof message.term === 'string' && typeof message.requestId === 'string')
       || (message.type === 'move' && Number.isFinite(message.dx) && Number.isFinite(message.dy))
       || (message.type === 'resize' && Number.isFinite(message.height)));

@@ -1,7 +1,7 @@
 {
   "name": "no-dice",
   "private": true,
-  "version": "0.22.2",
+  "version": "0.24.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,10 +22,10 @@
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^5.0.2",
+    "fake-indexeddb": "^6.2.5",
     "jsdom": "^26.1.0",
     "typescript": "~5.8.3",
     "vite": "^7.1.5",
     "vitest": "^3.2.4"
   }
 }
-

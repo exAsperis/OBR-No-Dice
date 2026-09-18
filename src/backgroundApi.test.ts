@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
+import 'fake-indexeddb/auto';
 import { NO_DICE_API_REQUEST, NO_DICE_API_RESPONSE } from './noDiceApi';
 import { RESULT_CHANNEL, type RollResult } from './protocol';
-import { loadHistory } from './persistence';
+import { getRecentRolls } from './sessionLedger';
 import { LOCAL_CHANNEL } from './revealProtocol';
 
 const state = vi.hoisted(() => ({
@@ -43,10 +44,10 @@ describe('background API registration', () => {
     listener({ data: { protocolVersion: 1, type: 'roll', requestId: 'recorded', expression: 'd1' }, connectionId: 'local' });
     await vi.waitFor(() => expect(state.sent.filter(item => item.channel === NO_DICE_API_RESPONSE)).toHaveLength(2));
     expect(state.sent.find(item => item.channel === RESULT_CHANNEL)).toMatchObject({ options: { destination: 'ALL' } });
-    expect(loadHistory('room', 'player').map(item => item.requestId)).not.toContain('recorded');
+    expect((await getRecentRolls('room', 'player')).map(item => item.requestId)).not.toContain('recorded');
     const recorded = state.sent.find(item => item.channel === RESULT_CHANNEL)!.data as RollResult;
     LocalChannel.instances.find(item => item.name === LOCAL_CHANNEL)!.onmessage?.({ data: { type: 'revealed', roomId: 'room', playerId: 'player', result: recorded } });
-    expect(loadHistory('room', 'player').map(item => item.requestId)).toContain('recorded');
+    await vi.waitFor(async () => expect((await getRecentRolls('room', 'player')).map(item => item.requestId)).toContain('recorded'));
     vi.unstubAllGlobals();
   });
 });

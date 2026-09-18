@@ -13,11 +13,12 @@ export const cryptoRng:Rng={integer(maxExclusive){
   return value%maxExclusive;
 }};
 export type Value=Facet|Facet[];
-export interface Evaluation {value:Value;trace:string[];stages:string[];stageDice?:string[];interpretation?:string}
+export interface DieDraw { die: string; dieIndex: number; face: Facet; kind: 'initial'|'reroll'|'explosion'; nodeSpan?:{start:number;end:number}; facetIndex?:number }
+export interface Evaluation {value:Value;trace:string[];stages:string[];stageDice?:string[];interpretation?:string;dice?:DieDraw[]}
 type Context='scalar'|'pool-source';
 /** One budget follows the entire roll, including dynamic parameters and nested facets. */
 export const MAX_ROLL_STEPS=20000;
-interface RollBudget { steps:number; depth:number }
+interface RollBudget { steps:number; depth:number; dice:DieDraw[] }
 function spend(budget:RollBudget):void{
   if(++budget.steps>MAX_ROLL_STEPS)throw new ExpressionError(`Roll exceeded the ${MAX_ROLL_STEPS}-step safety limit. Check for a non-terminating explosion or reroll.`);
 }
@@ -68,17 +69,18 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       const selected=customFacets?Array.from({length:count},()=>{spend(budget);return rng.integer(faceCount);}):undefined;
       const selectedLabels=selected?.map(index=>formatFacetShort(customFacets![index]));
       if(selectedLabels&&showStages){presentation.replace(node,show(selectedLabels));presentation.show(formatShort(node));}
+      let drawKind:DieDraw['kind']='initial', dieIndex=0;
       const draw=(preselected?:number):{value:Facet;explosion?:Explosion;facetReroll?:Explosion;index:number}=>{
         if(preselected===undefined)spend(budget);
         const index=preselected??rng.integer(faceCount);
-        if(node.die.kind==='standard-die')return {value:index+1,index,explosion:index+1===faceCount?node.die.explodeHighest:undefined,facetReroll:index===0?node.die.rerollLowest:undefined};
+        if(node.die.kind==='standard-die'){budget.dice.push({die:formatShort(node),dieIndex,face:index+1,kind:drawKind,nodeSpan:node.span,facetIndex:index});return {value:index+1,index,explosion:index+1===faceCount?node.die.explodeHighest:undefined,facetReroll:index===0?node.die.rerollLowest:undefined};}
         const facet=node.die.facets[index];
-        if(facet.kind==='value')return {value:facet.value,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
+        if(facet.kind==='value'){budget.dice.push({die:formatShort(node),dieIndex,face:facet.value,kind:drawKind,nodeSpan:node.span,facetIndex:index});return {value:facet.value,index,explosion:facet.explosion,facetReroll:facet.facetReroll};}
         trace.push(`facet ${index+1}/${faceCount} → ${formatFacetShort(facet)}`);
         if(facet.kind==='expression'){
           const result=evaluateNode(facet.expression,rng,'scalar',plan,presentation,false,budget);trace.push(...result.trace);
           if(Array.isArray(result.value))throw new ExpressionError('A facet expression must resolve to one value');
-          trace.push(`facet result → ${result.value}`);return {value:result.value,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
+          trace.push(`facet result → ${result.value}`);budget.dice.push({die:formatShort(node),dieIndex,face:result.value,kind:drawKind,nodeSpan:node.span,facetIndex:index});return {value:result.value,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
         }
         const rendered=facet.segments.map(segment=>{
           if(segment.kind==='text')return segment.text;
@@ -86,14 +88,15 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
           if(Array.isArray(result.value))throw new ExpressionError('A text facet expression must resolve to one value');
           return String(result.value);
         }).join('').trim();
-        trace.push(`facet result → ${rendered}`);return {value:rendered,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
+        trace.push(`facet result → ${rendered}`);budget.dice.push({die:formatShort(node),dieIndex,face:rendered,kind:drawKind,nodeSpan:node.span,facetIndex:index});return {value:rendered,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
       };
       for(let i=0;i<count;i++){
+        dieIndex=i;drawKind='initial';
         let drawn=draw(selected?.[i]),face=drawn.value;trace.push(`die ${i+1} → ${face}`);
         if(node.reroll){
           const {once,comparator,target}=node.reroll;
           const matches=(v:Facet)=>{const x=number(v);return comparator==='='?x===target:comparator==='<'?x<target:comparator==='<='?x<=target:comparator==='>'?x>target:x>=target;};
-          let tries=0;while(matches(face)){if(++tries>100)throw new ExpressionError('Reroll limit reached');drawn=draw();face=drawn.value;trace.push(`reroll → ${face}`);if(once)break;}
+          let tries=0;while(matches(face)){if(++tries>100)throw new ExpressionError('Reroll limit reached');drawKind='reroll';drawn=draw();face=drawn.value;trace.push(`reroll → ${face}`);if(once)break;}
         }
         const settleFacetRerolls=()=>{
           const rerollCounts=new Map<number,number>();let rerolls=0;
@@ -101,7 +104,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
             const used=rerollCounts.get(drawn.index)??0,limit=drawn.facetReroll.limit;
             if(limit!==undefined&&used>=limit)break;
             if(++rerolls>100)throw new ExpressionError('Reroll safety limit reached');
-            rerollCounts.set(drawn.index,used+1);drawn=draw();face=drawn.value;trace.push(`reroll → ${face}`);
+            rerollCounts.set(drawn.index,used+1);drawKind='reroll';drawn=draw();face=drawn.value;trace.push(`reroll → ${face}`);
           }
         };
         settleFacetRerolls();
@@ -110,7 +113,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
           const limit=drawn.explosion.limit??100,unbounded=drawn.explosion.limit===undefined;
           let extra=0;
           while(drawn.explosion&&extra<limit){
-            extra++;drawn=draw();face=drawn.value;trace.push(`explode → ${face}`);settleFacetRerolls();value=number(value)+number(face);
+            extra++;drawKind='explosion';drawn=draw();face=drawn.value;trace.push(`explode → ${face}`);settleFacetRerolls();value=number(value)+number(face);
           }
           if(unbounded&&extra===100&&drawn.explosion)throw new ExpressionError('Explosion safety limit reached');
           trace.push(`die ${i+1} total → ${value}`);
@@ -158,5 +161,5 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
     }
   }
 }
-export function evaluate(node:Node,rng:Rng=cryptoRng,recordStages=true):Evaluation{const presentation=new PresentationRecorder(node,recordStages);const result=evaluateNode(node,rng,'scalar',resolveSemantics(node),presentation,recordStages,{steps:0,depth:0});return {...result,stageDice:presentation.stageDice};}
+export function evaluate(node:Node,rng:Rng=cryptoRng,recordStages=true):Evaluation{const presentation=new PresentationRecorder(node,recordStages);const budget:RollBudget={steps:0,depth:0,dice:[]};const result=evaluateNode(node,rng,'scalar',resolveSemantics(node),presentation,recordStages,budget);return {...result,stageDice:presentation.stageDice,dice:budget.dice};}
 export const roll=evaluate;

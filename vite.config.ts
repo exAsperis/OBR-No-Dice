@@ -13,6 +13,7 @@ export default defineConfig({
         panel: "panel.html",
         background: "background.html",
         reveal: "reveal.html",
+        statistics: "statistics.html",
       },
     },
   },

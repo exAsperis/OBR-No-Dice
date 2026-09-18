@@ -43,6 +43,7 @@ export function rollExpression(input: RollExpressionInput, rng: Rng = cryptoRng)
     trace: outcome.trace,
     steps: outcome.stages,
     stepDice: outcome.stageDice,
+    resolution: { ast: parsed.ast, dice: outcome.dice ?? [] },
     time: Date.now(),
     label: input.label,
     source: input.source,

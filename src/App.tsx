@@ -6,7 +6,7 @@ import type { Dialect } from './engine/ast';
 import type { Distribution } from './engine/probability';
 import type { FairnessSnapshot } from './engine/fairness';
 import { useOwlbear } from './hooks/useOwlbear';
-import { loadHistory, saveHistory } from './persistence';
+import { defaultSessionName, ensureSession, getRecentRolls, migrateHistory, readSharedSession, renameSession, SESSION_KEY, startSession, type DiceSession } from './sessionLedger';
 import { encryptForGm } from './gmCrypto';
 import { GM_CHANNEL, isRequest, isResult, REQUEST_CHANNEL, RESULT_CHANNEL, type RollRequest, type RollResult, type Visibility } from './protocol';
 import { isLocalMessage, LOCAL_CHANNEL, type LocalMessage } from './revealProtocol';
@@ -24,6 +24,7 @@ import { MAX_ROLL_STEPS } from './engine/evaluate';
 import { ResultDisplay } from './ResultDisplay';
 import { resizeExpressionEditor } from './expressionEditor';
 import { ledgerWorkRows } from './ledgerWork';
+import './statistics.css';
 
 const display=displayValue;
 const MAX_VISIBLE_BARS=200;
@@ -34,6 +35,9 @@ export default function App() {
   const [detectedDialect,setDetectedDialect]=useState<Dialect|undefined>(undefined);
   const [visibility,setVisibility]=useState<Visibility>('everyone');
   const [history,setHistory]=useState<RollResult[]>([]);
+  const [session,setSession]=useState<DiceSession|null>(null);
+  const [sessionDialog,setSessionDialog]=useState<'new'|'rename'|null>(null);
+  const [sessionName,setSessionName]=useState('');
   const [chart,setChart]=useState<Distribution|null>(null);
   const [chartError,setChartError]=useState('');
   const [fairness,setFairness]=useState<FairnessSnapshot|null>(null);
@@ -117,6 +121,14 @@ export default function App() {
   },[obr.status]);
   useEffect(()=>{
     if(obr.status!=='ready'||!obr.roomId||!obr.playerId)return;
+    let active=true;const room=obr.roomId,player=obr.playerId;
+    const accept=(metadata:Record<string,unknown>)=>{const shared=readSharedSession(metadata);void ensureSession(room,player,shared).then(value=>{if(active)setSession(value);}).catch(()=>{});};
+    const unsubscribe=OBR.room.onMetadataChange(accept);
+    void OBR.room.getMetadata().then(async metadata=>{if(!active)return;const shared=readSharedSession(metadata);await migrateHistory(room,player,shared);if(active)setSession(await ensureSession(room,player,shared));}).catch(async()=>{if(active)setSession(await ensureSession(room,player));});
+    return()=>{active=false;unsubscribe();};
+  },[obr.status,obr.roomId,obr.playerId,obr.role]);
+  useEffect(()=>{
+    if(obr.status!=='ready'||!obr.roomId||!obr.playerId)return;
     const channel=new BroadcastChannel(VERIFY_LOCAL_CHANNEL);verifierChannel.current=channel;
     channel.onmessage=(event:MessageEvent<VerificationLocalMessage>)=>{
       const m=event.data;if(!m||m.roomId!==obr.roomId||m.playerId!==obr.playerId)return;
@@ -148,8 +160,7 @@ export default function App() {
     return ()=>{cancelAnimationFrame(frame);observer.disconnect();};
   },[preferencesReady,obr.roomId,obr.playerId]);
   const add=(result:RollResult)=>{ if(historyRef.current.some(x=>x.requestId===result.requestId)) return; const next=[...historyRef.current,result].slice(-100); historyRef.current=next; setHistory(next); if(!result.error&&result.expression===currentInput.current.expression&&result.dialect===currentInput.current.dialect)setChartRolls(previous=>[...previous,result.value]); };
-  useEffect(()=>{ if(!obr.roomId||!obr.playerId)return; const stored=loadHistory(obr.roomId,obr.playerId); historyRef.current=stored; setHistory(stored); },[obr.roomId,obr.playerId]);
-  useEffect(()=>{ if(obr.roomId&&obr.playerId)saveHistory(obr.roomId,obr.playerId,history); },[history,obr.roomId,obr.playerId]);
+  useEffect(()=>{if(!obr.roomId||!obr.playerId)return;let active=true;void migrateHistory(obr.roomId,obr.playerId).then(()=>getRecentRolls(obr.roomId!,obr.playerId!)).then(stored=>{if(active){historyRef.current=stored;setHistory(stored);}}).catch(()=>{});return()=>{active=false;};},[obr.roomId,obr.playerId]);
   useEffect(()=>{
     if(!obr.roomId||!obr.playerId)return;
     const channel=new BroadcastChannel(LOCAL_CHANNEL);revealChannel.current=channel;
@@ -278,6 +289,7 @@ export default function App() {
   const sendPanel=(message:PanelCommand)=>{
     if(obr.roomId&&obr.playerId)panelChannel.current?.postMessage({...message,roomId:obr.roomId,playerId:obr.playerId});
   };
+  const saveSession=async()=>{if(obr.role!=='GM'||!obr.roomId||!obr.playerId||!sessionName.trim()||!sessionDialog)return;const next=sessionDialog==='new'?await startSession(obr.roomId,obr.playerId,sessionName):await renameSession(obr.roomId,obr.playerId,sessionName);await OBR.room.setMetadata({[SESSION_KEY]:next});setSession(next);setSessionDialog(null);};
   const toggle=(section:'distribution'|'recent'|'history')=>setCollapsed(previous=>({...previous,[section]:!previous[section]}));
   const entry=(item:RollResult)=><article className="entry" key={item.requestId}>
     <div className="entry-meta"><strong>{item.playerName}</strong><span className="entry-meta-right"><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
@@ -292,6 +304,8 @@ export default function App() {
       <div className="panel-title-actions secondary-actions"><a className="header-action help-button" aria-label="No Dice help" title="No Dice help" href="https://no-dice.ex-asperis.com" target="_blank" rel="noopener noreferrer"><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9.2 9a3 3 0 1 1 5.2 2c-1.5 1.2-2.4 1.7-2.4 3"/><circle cx="12" cy="17.5" r="1" fill="currentColor" stroke="none"/></svg></a><button type="button" className="header-action panel-close" aria-label="Close panel" title="Close panel" onClick={()=>sendPanel({type:'close'})}><svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18"/></svg></button></div>
     </header>
     {obr.role==='GM'&&settingsOpen&&<GMSettings settings={roomSettings} verifiableRollsAvailable={verifiableRollsAvailable}/>}
+    <section className="session-strip"><span>Session: <strong>{session?.name??'Loading…'}</strong></span><div><button type="button" onClick={()=>sendPanel({type:'statistics'})}>Statistics</button>{obr.role==='GM'&&<><button type="button" onClick={()=>{setSessionName(session?.name??'');setSessionDialog('rename');}}>Rename</button><button type="button" onClick={()=>{setSessionName(defaultSessionName());setSessionDialog('new');}}>New Session</button></>}</div></section>
+    {sessionDialog&&<div className="session-dialog-backdrop"><form className="session-dialog" onSubmit={event=>{event.preventDefault();void saveSession();}}><h2>{sessionDialog==='new'?'New Session':'Rename Session'}</h2><label htmlFor="session-name">Session name</label><input id="session-name" value={sessionName} onChange={event=>setSessionName(event.target.value)} autoFocus maxLength={100}/><div><button type="button" onClick={()=>setSessionDialog(null)}>Cancel</button><button type="submit">Save</button></div></form></div>}
     <section className="probability" aria-label="Probability distribution">
       <button type="button" className="section-heading section-toggle distribution-heading" aria-expanded={!collapsed.distribution} onClick={()=>toggle('distribution')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.distribution?'▸':'▾'}</span><strong>Distribution</strong></span><span className="distribution-stats" aria-label={chart?`Range ${chart.range?chart.range.join(' to '):chart.entries.length+' outcomes'}, mean ${chart.mean?.toFixed(2)??'unavailable'}, standard deviation ${chart.standardDeviation?.toFixed(2)??'unavailable'}, mode ${display(chart.mode??'—')}`:'Range, mean, standard deviation, and mode unavailable'}><span>{chart?.range?`Range ${chart.range[0]}–${chart.range[1]}`:chart?`${chart.entries.length} outcomes`:'Range —'}</span><span>Mean {chart?.mean?.toFixed(2)??'—'}</span><span>SD {chart?.standardDeviation?.toFixed(2)??'—'}</span><span>Mode {chart?display(chart.mode??'—'):'—'}</span></span><span className="distribution-method">{chart?(chart.exact?'Exact':'≈ Estimated'):chartError?'Unavailable':'Enter an expression'}</span></button>
       {!collapsed.distribution&&<>

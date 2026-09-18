@@ -5,7 +5,8 @@ import { isLocalMessage, LOCAL_CHANNEL, REVEAL_POPOVER_ID, type LocalMessage } f
 import { MAX_API_BROADCAST_BYTES, NO_DICE_API_REQUEST, NO_DICE_API_RESPONSE } from './noDiceApi';
 import { createNoDiceApiHandler } from './noDiceApiHandler';
 import { rollExpression } from './rollService';
-import { appendHistory } from './persistence';
+import { appendRoll, LEDGER_CHANNEL, makeSession, migrateHistory, readSharedSession, SESSION_KEY } from './sessionLedger';
+import { EXTENSION_ID } from './constants';
 import { PANEL_CHANNEL, PANEL_POPOVER_ID, isPanelMessage, type PanelMessage } from './panelProtocol';
 import { clearDraft, fittedPosition, loadHeight, loadPosition, saveHeight, savePosition, type PanelPosition } from './panelLayout';
 import { RELEASE_VERSION } from './version';
@@ -17,6 +18,10 @@ OBR.onReady(async () => {
   const roomId = OBR.room.id;
   const playerId = OBR.player.id;
   const role = await OBR.player.getRole();
+  const sharedSession=async()=>{try{return readSharedSession(await OBR.room.getMetadata());}catch{return undefined;}};
+  const initialSession=await sharedSession();
+  if(role==='GM'&&!initialSession)await OBR.room.setMetadata({[SESSION_KEY]:makeSession()}).catch(()=>{});
+  const migration=migrateHistory(roomId,playerId,await sharedSession()).catch(()=>{});
   const verificationChannel=new BroadcastChannel(VERIFY_LOCAL_CHANNEL);
   const verifier=new VerificationClient(roomId,playerId,role,()=>verificationChannel.postMessage({type:'status',roomId,playerId,available:verifier.available} satisfies VerificationLocalMessage));
   void verifier.start().catch(()=>{});
@@ -27,6 +32,7 @@ OBR.onReady(async () => {
     if(message.type==='roll')void verifier.roll(message.input).then(result=>verificationChannel.postMessage({type:'roll-response',roomId,playerId,requestId:message.requestId,verification:result.verification} satisfies VerificationLocalMessage)).catch(()=>verificationChannel.postMessage({type:'roll-response',roomId,playerId,requestId:message.requestId} satisfies VerificationLocalMessage));
   };
   const local = new BroadcastChannel(LOCAL_CHANNEL);
+  const ledgerEvents = new BroadcastChannel(LEDGER_CHANNEL);
   const seen = new Set<string>();
   let current: RollResult | null = null;
   let popoverOpen = false;
@@ -36,6 +42,7 @@ OBR.onReady(async () => {
   let revealPosition: PanelPosition | null = loadRevealPosition(playerId);
   let revealResume: { visibleCount: number; highlighted: boolean; dismissDeadline?: number } | null = null;
   const panelChannel = new BroadcastChannel(PANEL_CHANNEL);
+  const statisticsId=`${EXTENSION_ID}/statistics`;
   let panelOpen = false;
   let panelOpening = false;
   let closeAfterOpening = false;
@@ -119,6 +126,7 @@ OBR.onReady(async () => {
     const message = event.data;
     if (message.roomId !== roomId || message.playerId !== playerId) return;
     if (message.type === 'open') { void openPanel(); return; }
+    if (message.type === 'statistics') { void (async()=>{const bounds=await panelBounds();await OBR.popover.open({id:statisticsId,url:new URL(`./statistics.html?v=${RELEASE_VERSION}`,window.location.href).toString(),width:Math.min(620,Math.max(320,bounds.width-24)),height:Math.min(700,Math.max(300,bounds.height-24)),anchorReference:'POSITION',anchorPosition:{left:Math.max(8,Math.round((bounds.width-Math.min(620,bounds.width-24))/2)),top:Math.max(8,Math.round((bounds.height-Math.min(700,bounds.height-24))/2))},anchorOrigin:{horizontal:'LEFT',vertical:'TOP'},transformOrigin:{horizontal:'LEFT',vertical:'TOP'},hidePaper:true,disableClickAway:true,marginThreshold:8});})().catch(()=>{});return; }
     if (message.type === 'toggle') { if (panelOpen || panelOpening) void closePanel(); else void openPanel(); return; }
     if (message.type === 'state-request') { sendPanelState(panelOpen && !closeAfterOpening); return; }
     if (message.type === 'shortcut') {
@@ -223,7 +231,7 @@ OBR.onReady(async () => {
       revealResume = null;
     }
     if (message.type === 'revealed' && isResult(message.result)) {
-      appendHistory(roomId, playerId, message.result);
+      void migration.then(async()=>{await appendRoll(roomId,playerId,message.result,await sharedSession());ledgerEvents.postMessage({roomId,playerId});}).catch(()=>{});
     }
     if (message.type === 'dismiss') {
       current = null;
