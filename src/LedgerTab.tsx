@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react';
-import type { StoredRoll } from './sessionLedger';
+import type { DiceSession, StoredRoll } from './sessionLedger';
+import { downloadText, exportSessionCsv, exportSessionJson } from './sessionExport';
 import { buildQueryAnalysis, type ResultComparison } from './sequenceStats';
 import { dieType, outcomeDistribution, playerStats, summary } from './analytics';
 import { QUERY_PRESETS, type QueryPreset } from './queryPresets';
@@ -8,7 +9,7 @@ const display=(value:StoredRoll['finalResult'])=>Array.isArray(value)?`[${value.
 const operators:ResultComparison[]=['any','=','<=','>='];
 const operatorLabel=(operator:ResultComparison)=>operator==='any'?'Any':operator==='>='?'≥':operator==='<='?'≤':'=';
 
-export function SequenceTab({rolls}:{rolls:StoredRoll[]}){
+export function LedgerTab({rolls,sessionRolls,session}:{rolls:StoredRoll[];sessionRolls:StoredRoll[];session?:DiceSession}){
   const available=useMemo(()=>[...new Map(rolls.map(roll=>[roll.rollerId,roll.rollerName])).entries()].map(([id,name])=>({id,name})).sort((a,b)=>a.name.localeCompare(b.name)),[rolls]);
   const allDieTypes=useMemo(()=>[...new Set(rolls.flatMap(roll=>roll.resolution.dice.map(draw=>dieType(roll,draw))))].sort(),[rolls]);
   const categories=useMemo(()=>[...new Set(rolls.map(roll=>roll.result.interpretation).filter((value):value is string=>Boolean(value)))].sort(),[rolls]);
@@ -30,6 +31,13 @@ export function SequenceTab({rolls}:{rolls:StoredRoll[]}){
   const validRoll=rollComparison==='any'||(rollValue.trim()!==''&&Number.isFinite(rollNumber));
   const analysis=useMemo(()=>validResult&&validRoll?buildQueryAnalysis(rolls,{pattern,selectedPlayers:selected,result:{comparison:resultComparison,value:resultNumber},roll:{comparison:rollComparison,value:rollNumber,dieType:rollDie||undefined},category,from:from?new Date(from).getTime():undefined,until:until?new Date(until).getTime()+60_000:undefined}):{entries:[],players:[],eligible:0,matching:0,error:'Enter a numeric filter value.'},[rolls,pattern,chosen,resultComparison,resultNumber,rollComparison,rollNumber,rollDie,category,from,until,validResult,validRoll]);
   const matched=useMemo(()=>analysis.entries.map(entry=>entry.roll),[analysis]);
+  const filenameBase=`no-dice-${(session?.name??'session').toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').replace(/-(\d{2})-(\d{2})$/,'-$1$2')||'session'}`;
+  const exportRolls=(kind:'results'|'session-csv'|'session-json')=>{
+    if(!session)return;
+    if(kind==='results')downloadText(`${filenameBase}-results.csv`,exportSessionCsv(session,matched),'text/csv;charset=utf-8');
+    else if(kind==='session-csv')downloadText(`${filenameBase}-session.csv`,exportSessionCsv(session,sessionRolls),'text/csv;charset=utf-8');
+    else downloadText(`${filenameBase}-session.json`,exportSessionJson(session,sessionRolls),'application/json;charset=utf-8');
+  };
   const totals=useMemo(()=>summary(matched),[matched]);
   const playersStats=useMemo(()=>playerStats(matched),[matched]);
   const dieTypes=useMemo(()=>[...new Set(matched.flatMap(roll=>roll.resolution.dice.map(draw=>dieType(roll,draw))))].sort(),[matched]);
@@ -50,7 +58,8 @@ export function SequenceTab({rolls}:{rolls:StoredRoll[]}){
     setOutcomeDie(preset.roll?.dieType??'');
     setChosen(null);setCategory('');setFrom('');setUntil('');
   };
-  return <section className="sequence-tab" aria-label="Roll sequence">
+  return <section className="sequence-tab" aria-label="Ledger">
+    <details className="ledger-export"><summary>Export</summary><div><button type="button" disabled={!session||matched.length===0} onClick={()=>exportRolls('results')}>CSV · Current Results</button><button type="button" disabled={!session} onClick={()=>exportRolls('session-csv')}>CSV · Entire Session</button><button type="button" disabled={!session} onClick={()=>exportRolls('session-json')}>JSON · Entire Session</button></div></details>
     <p className="sequence-help">Result checks the final expression value. Roll checks any individual die draw in the matching record, including rerolls and explosions. Shared Statistics filters also apply.</p>
     <div className="query-presets" aria-label="Query shortcuts"><strong>Shortcuts</strong>{QUERY_PRESETS.map(preset=><button key={preset.id} type="button" title={preset.description} onClick={()=>applyPreset(preset)}>{preset.label}</button>)}</div>
     <div className="sequence-controls">

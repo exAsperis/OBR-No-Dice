@@ -12,7 +12,7 @@ import './statistics.css';
 
 const percentage=(count:number,total:number)=>total?`${(count/total*100).toFixed(1)}%`:'0.0%';
 const viewTransitionKey=`${EXTENSION_ID}/statistics-view-transition`;
-type StatisticsView={selected:string;tab:AnalyticsTab;player:string;expression:string};
+type StatisticsView={selected:string;tab:AnalyticsTab|'query';player:string;expression:string};
 const restoredView=(()=>{try{const value=sessionStorage.getItem(viewTransitionKey);sessionStorage.removeItem(viewTransitionKey);return value?JSON.parse(value) as Partial<StatisticsView>:null;}catch{return null;}})();
 
 function Statistics(){
@@ -20,7 +20,7 @@ function Statistics(){
   const [sessions,setSessions]=useState<DiceSession[]>([]);
   const [selected,setSelected]=useState(restoredView?.selected??'');
   const [rolls,setRolls]=useState<StoredRoll[]>([]);
-  const [tab,setTab]=useState<AnalyticsTab>(restoredView?.tab??'overview');
+  const [tab,setTab]=useState<AnalyticsTab>(restoredView?.tab==='query'?'ledger':tabs.includes(restoredView?.tab as AnalyticsTab)?restoredView!.tab as AnalyticsTab:'overview');
   const [player,setPlayer]=useState(restoredView?.player??'');
   const [expression,setExpression]=useState(restoredView?.expression??'');
   const [maximized]=useState(new URLSearchParams(window.location.search).get('maximized')==='1');
@@ -57,7 +57,7 @@ function Statistics(){
       <label className="session-select">Session <select value={selected} onChange={event=>{setSelected(event.target.value);setPlayer('');setExpression('');}}>{sessions.map(item=><option key={item.id} value={item.id}>{item.endedAt?item.name:`Current Session · ${item.name}`}</option>)}</select></label>
       <div className="shared-filters"><label>Player <select value={player} onChange={event=>setPlayer(event.target.value)}><option value="">All</option>{players.map(item=><option key={item.id} value={item.id}>{item.name}</option>)}</select></label><label>Expression <select value={expression} onChange={event=>setExpression(event.target.value)}><option value="">All</option>{expressions.map(item=><option key={item.id} value={item.id}>{item.label}</option>)}</select></label>{(player||expression)&&<button type="button" onClick={()=>{setPlayer('');setExpression('');}}>Clear filters</button>}</div>
       <nav className="statistics-tabs" aria-label="Statistics view">{tabs.map(item=><button key={item} type="button" aria-current={tab===item?'page':undefined} onClick={()=>setTab(item)}>{item[0].toUpperCase()+item.slice(1)}</button>)}</nav>
-      <AnalyticsTabs tab={tab} rolls={filtered} sessionName={selectedSession?.name??'Current Session'} player={player} expression={expression} onPlayer={setPlayer} onExpression={setExpression}/>    </div>
+      <AnalyticsTabs tab={tab} rolls={filtered} sessionRolls={rolls} session={selectedSession} sessionName={selectedSession?.name??'Current Session'} player={player} expression={expression} onPlayer={setPlayer} onExpression={setExpression}/>    </div>
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<StrictMode><Statistics/></StrictMode>);
