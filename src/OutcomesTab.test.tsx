@@ -65,6 +65,13 @@ describe('OutcomesTab',()=>{
     expect(bars[0].style.width).toBe('50%');
   });
 
+  it('labels the outcome bars as relative frequency with help',()=>{
+    render(<OutcomesTab rolls={[roll('d6','Joe',[0],1)]} roomId="room" viewerId="viewer"/>);
+    const term=within(outcomeTable()).getByText('Relative frequency');
+    expect(term.classList.contains('help-term')).toBe(true);
+    expect(within(outcomeTable()).queryByText('Distribution')).toBeNull();
+  });
+
   it('analyzes one selected die type, includes repeated draws, and keeps Analyze die separate from Roll die',()=>{
     const mixed=roll('d20+d6','Joe',[19,2],1),repeated=roll('d6!2','Bill',[5,0,1],2);
     render(<OutcomesTab rolls={[mixed,repeated]} roomId="room" viewerId="viewer"/>);

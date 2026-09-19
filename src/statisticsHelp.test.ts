@@ -14,6 +14,8 @@ const REQUIRED_KEYS = [
   'median',
   'mode',
   'distribution',
+  'relativeFrequency',
+  'observedVsExpected',
   'observed',
   'expected',
   'range',

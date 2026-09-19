@@ -10,6 +10,8 @@ export const STATISTICS_HELP = {
   median: 'The middle numeric value after the results are sorted. With an even number of results, it is halfway between the two middle values.',
   mode: 'The most frequently occurring outcome. More than one outcome can be tied for mode.',
   distribution: 'How results are spread among the possible outcomes. In observed tables, it shows how often each outcome actually occurred.',
+  relativeFrequency: 'A quick visual comparison of how often outcomes occurred. The most common observed outcome gets a full-width bar; every other bar is scaled relative to it. Use Observed % for the actual percentage.',
+  observedVsExpected: 'The filled bar uses a fixed 0%–100% scale and shows the observed percentage. The thin marker shows the exact expected percentage. Their separation shows the direction and size of the difference, not whether the dice are fair.',
   observed: 'What actually happened in the selected session or sample.',
   expected: 'What the exact probability model predicts over many rolls.',
   range: 'The span from the lowest numeric value to the highest.',
@@ -54,7 +56,7 @@ export const STATISTICS_HELP = {
   outsideTheoreticalSupport: 'Stored numeric results that do not appear in the current exact theoretical distribution. This can occur with legacy/imported data or after implementation changes and is reported rather than silently discarded.',
   differencePercentagePoints: 'Observed percentage minus Expected percentage. The result is shown in percentage points, abbreviated “pp.” For example, 30% observed versus 25% expected is +5 percentage points.',
   approximate95PercentSampleRange: 'An approximate range of observed percentages this single outcome would commonly produce in repeated samples of this size if the theoretical model were used. It is not a pass/fail test, and with many outcomes some values may fall outside their ranges by chance.',
-  cumulativeAveragePercentile: 'The running average of exact midpoint percentiles from the first comparable roll through each later roll. Over a large random sample it tends toward 50%, but shorter samples can wander.',
+  cumulativeAveragePercentile: 'After each comparable roll, No Dice converts that result to a percentile within this expression, then averages it with all earlier comparable rolls. The chart shows how that running average changes over time. Over many random rolls it tends toward 50%.',
   expectedPositionMarker: 'The thin marker shows the exact expected percentage; the filled bar shows the observed percentage.',
 } as const;
 
