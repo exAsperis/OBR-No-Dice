@@ -6,7 +6,7 @@ import type { Dialect } from './engine/ast';
 import type { Distribution } from './engine/probability';
 import type { FairnessSnapshot } from './engine/fairness';
 import { useOwlbear } from './hooks/useOwlbear';
-import { defaultSessionName, getRecentRolls, getSessionRolls, localDateTime, migrationPreview, migrateHistory, parseLocalDateTime, readSharedSession, renameSession, rollbackSessionSplit, SESSION_KEY, startSession, synchronizeRoomSession, LEDGER_CHANNEL, type DiceSession, type StoredRoll } from './sessionLedger';
+import { defaultSessionName, getRecentStoredRolls, getSessionRolls, listSessions, localDateTime, migrationPreview, migrateHistory, parseLocalDateTime, readSharedSession, renameSession, rollbackSessionSplit, SESSION_KEY, startSession, synchronizeRoomSession, LEDGER_CHANNEL, type DiceSession, type StoredRoll } from './sessionLedger';
 import { detectStaleSession, reminderKey } from './staleSession';
 import { EXTENSION_ID } from './constants';
 import { encryptForGm } from './gmCrypto';
@@ -33,13 +33,14 @@ import './statistics.css';
 
 const display=displayValue;
 const MAX_VISIBLE_BARS=200;
+type RollCardResult=RollResult & {sessionName?:string};
 export default function App() {
   const obr=useOwlbear();
   const [expression,setExpression]=useState('');
   const [dialectHint,setDialectHint]=useState<Dialect|undefined>(undefined);
   const [detectedDialect,setDetectedDialect]=useState<Dialect|undefined>(undefined);
   const [visibility,setVisibility]=useState<Visibility>('everyone');
-  const [history,setHistory]=useState<RollResult[]>([]);
+  const [history,setHistory]=useState<RollCardResult[]>([]);
   const [session,setSession]=useState<DiceSession|null>(null);
   const [sessionDialog,setSessionDialog]=useState<'new'|'rename'|null>(null);
   const [sessionName,setSessionName]=useState('');
@@ -85,7 +86,7 @@ export default function App() {
   const fairnessId=useRef(0);
   const revealChannel=useRef<BroadcastChannel|null>(null);
   const sequence=useRef(0);
-  const historyRef=useRef<RollResult[]>([]);
+  const historyRef=useRef<RollCardResult[]>([]);
   const pendingLocalRolls=useRef(new Set<string>());
   const inputRef=useRef<HTMLTextAreaElement|null>(null);
   const currentInput=useRef({expression,dialect:detectedDialect});
@@ -148,7 +149,9 @@ export default function App() {
       queue=queue.catch(()=>{}).then(async()=>{await migrateHistory(room,player,previous??shared);const value=await synchronizeRoomSession(room,player,shared,previous);if(!active)return;
         setSession(value);
         if(lastSessionId!==value.id){lastSessionId=value.id;setChartRolls([]);setSelected(null);
-          const recent=value.kind==='override'?(await getSessionRolls(room,player,value.id)).slice(-100).map(roll=>roll.result):await getRecentRolls(room,player);
+          const stored=value.kind==='override'?(await getSessionRolls(room,player,value.id)).slice(-100):await getRecentStoredRolls(room,player);
+          const sessions=await listSessions(room,player);const names=new Map(sessions.map(item=>[item.id,item.name]));
+          const recent=stored.map(roll=>({...roll.result,sessionName:names.get(roll.sessionId)??value.name}));
           if(active){historyRef.current=recent;setHistory(recent);}}
       }).catch(()=>{});
     };
@@ -207,7 +210,7 @@ export default function App() {
     measure();
     return ()=>{cancelAnimationFrame(frame);observer.disconnect();};
   },[preferencesReady,obr.roomId,obr.playerId]);
-  const add=(result:RollResult)=>{ if(historyRef.current.some(x=>x.requestId===result.requestId)) return; const next=[...historyRef.current,result].slice(-100); historyRef.current=next; setHistory(next); if(!result.error&&result.expression===currentInput.current.expression&&result.dialect===currentInput.current.dialect)setChartRolls(previous=>[...previous,result.value]); };
+  const add=(result:RollResult)=>{ if(historyRef.current.some(x=>x.requestId===result.requestId)) return; const card={...result,sessionName:session?.name}; const next=[...historyRef.current,card].slice(-100); historyRef.current=next; setHistory(next); if(!result.error&&result.expression===currentInput.current.expression&&result.dialect===currentInput.current.dialect)setChartRolls(previous=>[...previous,result.value]); };
   useEffect(()=>{
     if(!obr.roomId||!obr.playerId)return;
     const channel=new BroadcastChannel(LOCAL_CHANNEL);revealChannel.current=channel;
@@ -376,8 +379,8 @@ export default function App() {
   const openNewSession=(start?:number)=>{setSessionName(defaultSessionName());setSessionStart(localDateTime(new Date(start??Date.now()),true));setSessionError('');setSessionDialog('new');};
   const saveSession=async()=>{if(roomSettings.overrideMode?.enabled||obr.role!=='GM'||!obr.roomId||!obr.playerId||!sessionName.trim()||!sessionDialog||startError||(sessionDialog==='new'&&!sessionRollsLoaded))return;setSessionError('');let created:DiceSession|undefined;try{if(readRoomSettings(await OBR.room.getMetadata()).overrideMode?.enabled)throw new Error('Override Mode is active.');const next=sessionDialog==='new'?await startSession(obr.roomId,obr.playerId,sessionName,selectedStart,preview.count):await renameSession(obr.roomId,obr.playerId,sessionName);if(sessionDialog==='new')created=next;await OBR.room.setMetadata({[SESSION_KEY]:next});setSession(next);setSessionDialog(null);setSessionRolls([]);}catch(error){if(created&&session)try{await rollbackSessionSplit(obr.roomId,obr.playerId,session,created);}catch{setSessionError('The room update failed and the local session could not be restored. Reopen No Dice to synchronize.');return;}setSessionError(error instanceof Error?error.message:'Could not save the session.');if(session)void getSessionRolls(obr.roomId,obr.playerId,session.id).then(setSessionRolls).catch(()=>{});}};
   const toggle=(section:'distribution'|'recent'|'history')=>setCollapsed(previous=>({...previous,[section]:!previous[section]}));
-  const entry=(item:RollResult,isRecent=false)=><article className="entry" key={item.requestId} ref={isRecent?recentCardRef:undefined}>
-    <div className="entry-meta"><strong>{item.playerName}</strong><span className="entry-meta-right"><span>{item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'} · {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
+  const entry=(item:RollCardResult,isRecent=false)=><article className="entry" key={item.requestId} ref={isRecent?recentCardRef:undefined}>
+    <div className="entry-meta"><strong>{item.playerName}</strong>→ {item.visibility==='everyone'?'Everyone':item.visibility==='gm'?'GM':'Self'}<span className="entry-meta-right"><span>{item.sessionName&&<> ({item.sessionName})</>} {new Date(item.time).toLocaleTimeString([], {hour:'numeric',minute:'2-digit'})}</span></span></div>
     <button type="button" className="expression-link" onClick={()=>{setExpression(item.expression);setDialectHint(item.dialect);setSelected(null);}} title="Put this expression back in the input">{item.expression}</button>
     {item.label&&<div className="entry-label">{item.label}</div>}
     <details className="work-details" open={isRecent?showWorkOpen:undefined} onToggle={isRecent?event=>{const open=event.currentTarget.open;setShowWorkOpen(open);if(obr.roomId&&obr.playerId)saveShowWork(obr.roomId,obr.playerId,open);}:undefined}><summary>Show work</summary><div className="work-rows">{ledgerWorkRows(item).map((row,i)=><div className="work-row" key={i}><WorkDieCell die={row.die} result={item} indices={row.drawIndices} moments={momentsByRollId.get(item.requestId)??[]}/><span className="work-expression">{row.expression}</span></div>)}</div></details>
