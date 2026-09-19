@@ -44,4 +44,10 @@ describe('AnalyticsTabs',()=>{
     expect(screen.getByLabelText('Expression regex')).toBeTruthy();
     expect(screen.getByText('2 of 2 session rolls match the current filters.')).toBeTruthy();
   });
+
+  it('renders the extracted Highlights summary',()=>{
+    renderTab('highlights');
+    expect(screen.getByRole('heading',{name:'Highlights'})).toBeTruthy();
+    expect(screen.getByText('⬆ Highest normalized result')).toBeTruthy();
+  });
 });

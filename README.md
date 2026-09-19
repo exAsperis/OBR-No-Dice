@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.48.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.49.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -256,3 +256,5 @@ Version 0.46.0 makes the Timeline band duration user-selectable in minutes, reta
 Version 0.47.0 redesigns Outcomes around tab-local Ledger-semantic filters, distinct final-result and selected-die analyses, observed distributions, descriptive summaries, and Results-only interpretation frequencies. Stored sessions, rolls, expression syntax, and public broadcast/API formats are unchanged.
 
 Version 0.48.0 redesigns Expressions as a normalized-expression comparison view with dialect-aware grouping, observed numeric summaries, and exact-only theoretical distribution comparisons. Stored sessions, rolls, expression syntax, and public broadcast/API formats are unchanged.
+
+Version 0.49.0 redesigns Highlights around shared exact rarity moments, normalized percentile extrema, genuine initial dice pools, streaks, explosion chains, and sliding session-pace bursts. Stored sessions, rolls, expression syntax, and public broadcast/API formats are unchanged.

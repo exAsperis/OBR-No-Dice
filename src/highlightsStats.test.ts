@@ -1,0 +1,18 @@
+import { describe, expect, it } from 'vitest';
+import { clearTheoreticalCache } from './analytics';
+import { buildHighlights, formatRarityProbability } from './highlightsStats';
+import { rollExpression } from './rollService';
+import { normalizeExpression, type StoredRoll } from './sessionLedger';
+
+let serial=0;
+function roll(expression:string,faces:number[],time:number,player='Joe'):StoredRoll{let index=0;const result=rollExpression({requestId:`highlight-${++serial}`,expression,visibility:'everyone',playerId:player,playerName:player},{integer:max=>(faces[index++]??faces.at(-1)??0)%max}).record;result.time=time;return {id:result.requestId,sessionId:'session',timestamp:time,rollerId:player,rollerName:player,expression,normalizedExpression:normalizeExpression(result),finalResult:result.value,resolution:result.resolution!,visibility:result.visibility,result};}
+
+describe('Highlights analytics',()=>{
+  it('selects normalized extrema instead of raw numerical extrema',()=>{const rawLarge=roll('d100',[86],1),normalizedHigh=roll('d6',[5],2),rawSmall=roll('d6',[0],3),normalizedLow=roll('d100',[1],4);const data=buildHighlights([rawLarge,normalizedHigh,rawSmall,normalizedLow]);expect(data.highest?.roll).toBe(normalizedHigh);expect(data.lowest?.roll).toBe(normalizedLow);});
+  it('allows estimated references in normalized extrema and streaks',()=>{clearTheoreticalCache();const estimated=[roll('d6r',[5],1),roll('d6r',[5],2),roll('d6r',[5],3)];const data=buildHighlights(estimated);expect(data.highest?.percentile.exact).toBe(false);expect(data.highStreak?.count).toBe(3);expect(data.rarestResult?.moment.type==='result-rarity'&&data.rarestResult.roll===data.highest?.roll).toBe(false);});
+  it('selects exact rarity moments from the shared analyzer',()=>{const rareResult=roll('4d6',[5,5,5,5],1),rareDie=roll('d100',[0],2),repeat=[roll('d20',[19],3),roll('d20',[19],4),roll('d20',[19],5)];const data=buildHighlights([rareResult,rareDie,...repeat]);expect(data.rarestResult).toMatchObject({roll:rareResult,moment:{type:'result-rarity'}});expect(data.rarestDie).toMatchObject({roll:rareDie,moment:{type:'die-rarity'}});expect(data.rareRepeat).toMatchObject({roll:repeat[2],moment:{type:'streak-rarity',streakLength:3}});});
+  it('measures one initial dice term and does not inflate explosions',()=>{const mixed=roll('4d6+3d8',[0,0,0,0,0,0,0],1),exploding=roll('d6!2',[5,5,0],2);const data=buildHighlights([mixed,exploding]);expect(data.largestPool).toMatchObject({roll:mixed,count:4});expect(buildHighlights([exploding]).largestPool?.count).toBe(1);expect(data.explosion).toMatchObject({roll:exploding,count:2});});
+  it('preserves percentile and natural-extreme streaks',()=>{const highs=[roll('d6',[5],1,'High'),roll('d6',[4],3,'High'),roll('d6',[5],5,'High')],lows=[roll('d20',[0],2,'Low'),roll('d20',[1],4,'Low'),roll('d20',[0],6,'Low')],maxima=[roll('d6',[5],7,'Max'),roll('d20',[19],8,'Max')],minima=[roll('d6',[0],9,'Min'),roll('d20',[0],10,'Min')];const data=buildHighlights([...highs,...lows,...maxima,...minima]);expect(data.highStreak?.count).toBe(3);expect(data.lowStreak?.count).toBe(3);expect(data.naturalMaximum?.count).toBe(2);expect(data.naturalMinimum?.count).toBe(2);});
+  it('finds a sliding sixty-second burst across clock boundaries',()=>{const data=buildHighlights([roll('d6',[0],59_990),roll('d6',[1],60_010),roll('d6',[2],120_000)]);expect(data.fastestBurst).toEqual({count:2,start:59_990,end:60_010});});
+  it('formats rare probabilities without rounding them to zero',()=>{expect(formatRarityProbability(.05)).toBe('5.0%');expect(formatRarityProbability(.028)).toBe('2.8%');expect(formatRarityProbability(.0025)).toBe('0.25%');expect(formatRarityProbability(.0001)).toBe('0.010%');});
+});
