@@ -5,7 +5,7 @@ import { applyOwlbearTheme } from './theme';
 import { EXTENSION_ID } from './constants';
 import { isResult, type RollResult } from './protocol';
 import { isLocalMessage, LOCAL_CHANNEL, REVEAL_POPOVER_ID, type LocalMessage } from './revealProtocol';
-import { nextRevealCount, reductionDiff, revealLineExploded, revealLines } from './revealLines';
+import { nextRevealCount, reductionDiff, revealLines } from './revealLines';
 import { DEFAULT_ROOM_SETTINGS, readRoomSettings } from './roomSettings';
 import type { Distribution } from './engine/probability';
 import { Toggle } from './Toggle';
@@ -100,7 +100,6 @@ function Reveal() {
   const identity = useRef<{ roomId: string; playerId: string } | null>(null);
   const list = useRef<HTMLDivElement | null>(null);
   const shell = useRef<HTMLElement | null>(null);
-  const pausedExplosionFrames=useRef(new Set<string>());
   const startedMomentFrames=useRef(new Set<string>());
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const progress = useRef<{ requestId: string; count: number } | null>(null);
@@ -134,7 +133,7 @@ function Reveal() {
         progress.current={requestId:event.data.result.requestId,count:resumed};
         resumeDeadline.current=Number.isFinite(event.data.resume?.dismissDeadline) ? event.data.resume!.dismissDeadline! : null;
         setDismissTiming(null);
-        if (newResult) { setFinishedRequestId(null); setDieRings([]); setRarityRing(null); setMomentAnimatingRequestId(null); setMomentFrameDoneRequestId(null); pausedExplosionFrames.current.clear(); startedMomentFrames.current.clear(); }
+        if (newResult) { setFinishedRequestId(null); setDieRings([]); setRarityRing(null); setMomentAnimatingRequestId(null); setMomentFrameDoneRequestId(null); startedMomentFrames.current.clear(); }
         setVisibleCount(resumed);
         setHighlightedRequestId(event.data.resume?.highlighted?event.data.result.requestId:null);
         setRerolling(false);
@@ -156,14 +155,7 @@ function Reveal() {
     let shown = progress.current?.requestId === result.requestId ? progress.current.count : 1;
     if (shown >= total) return;
     if (calculationSpeedMs === 0) { progress.current = { requestId: result.requestId, count: total }; setVisibleCount(total); return; }
-    const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const timer = window.setInterval(() => {
-      const pauseKey=`${result.requestId}:${shown}`;
-      const line=lines[shown-1];
-      if(!reducedMotion&&revealLineExploded(line,result)&&!pausedExplosionFrames.current.has(pauseKey)){
-        pausedExplosionFrames.current.add(pauseKey);
-        return;
-      }
       shown = nextRevealCount(shown, total);
       progress.current = { requestId: result.requestId, count: shown };
       setVisibleCount(shown);
