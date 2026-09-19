@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.37.2.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.37.3.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -232,3 +232,5 @@ Version 0.37.0 expands room Override Mode to static numeric custom dice such as 
 Version 0.37.1 lets individual die Roll Moment rings animate during their evaluation line without holding the next evaluation frame. Explosion triggers retain their dedicated hold frame, and result-rarity and streak animations still receive a post-result frame before reveal completion and auto-dismiss begin.
 
 Version 0.37.2 also removes the dedicated hold frame for explosion animations. Die rarity and explosion effects now run concurrently with normal evaluation-line timing, while result-rarity and streak effects retain their post-result frame before reveal completion and auto-dismiss.
+
+Version 0.37.3 preserves the user's Most Recent Result collapsed state when a roll or reroll starts. While collapsed, the previous result preview is replaced by “Rolling . . .” until the new result is recorded. This compatible fix does not change expressions, roll results, or broadcast messages.

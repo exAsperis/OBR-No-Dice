@@ -219,7 +219,6 @@ export default function App() {
       if(event.data.type==='reroll-started'){
         rememberRecentCardHeight();
         setRollingRequestId(event.data.requestId);
-        setCollapsed(previous=>({...previous,recent:false}));
         pendingLocalRolls.current.add(event.data.requestId);
         return;
       }
@@ -321,7 +320,7 @@ export default function App() {
     }
     finally {setBusy(false);}
   }
-  function submit() { if(busy||!expression.trim())return;rememberRecentCardHeight();const requestId=crypto.randomUUID();setRollingRequestId(requestId);setCollapsed(previous=>({...previous,recent:false}));void perform({version:1,requestId,expression,dialect:dialectHint,visibility},true); }
+  function submit() { if(busy||!expression.trim())return;rememberRecentCardHeight();const requestId=crypto.randomUUID();setRollingRequestId(requestId);void perform({version:1,requestId,expression,dialect:dialectHint,visibility},true); }
   function useShortcut(term:string,requestId:string) {
     const next=applyDiceShortcutOnce(currentInput.current.expression,term,requestId,seenShortcutIds.current);
     if(next===null)return;
@@ -410,8 +409,8 @@ export default function App() {
       {!inputError&&chartError&&<div id="input-error" className="input-error" role="status">{chartError}</div>}
     </form>
     <section className="recent-section" aria-label="Most recent result">
-      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.recent?'▸':'▾'}</span><strong>Most Recent Result</strong></span>{collapsed.recent&&recent&&<span className="collapsed-recent-result"><span className="collapsed-recent-content">{recent.overridden?<span className="verification-preview override-indicator">OVERRIDE</span>:recent.verification&&<span className={`verification-preview ${recent.verification.state}`}>{recent.verification.state==='verified'?'✓':'⚠'}</span>}<span className={`collapsed-output${recent.error?' error':''}`}>{recent.error??display(recent.value)}</span><span className="collapsed-recent-player" title={recent.playerName}>({recent.playerName})</span></span></span>}</button>
-      {!collapsed.recent&&(rollingRequestId?<article className="entry rolling-entry" role="status" style={rollingCardHeight?{height:rollingCardHeight,minHeight:rollingCardHeight}:undefined}>Rolling . . .</article>:recent?entry(recent,true):<div className="empty">No rolls yet.</div>)}
+      <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.recent} onClick={()=>toggle('recent')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.recent?'▸':'▾'}</span><strong>Most Recent Result</strong></span>{collapsed.recent&&(rollingRequestId?<span className="collapsed-recent-result" role="status"><span className="collapsed-recent-content"><span className="collapsed-output">Evaluating . . .</span></span></span>:recent&&<span className="collapsed-recent-result"><span className="collapsed-recent-content">{recent.overridden?<span className="verification-preview override-indicator">OVERRIDE</span>:recent.verification&&<span className={`verification-preview ${recent.verification.state}`}>{recent.verification.state==='verified'?'✓':'⚠'}</span>}<span className={`collapsed-output${recent.error?' error':''}`}>{recent.error??display(recent.value)}</span><span className="collapsed-recent-player" title={recent.playerName}>({recent.playerName})</span></span></span>)}</button>
+      {!collapsed.recent&&(rollingRequestId?<article className="entry rolling-entry" role="status" style={rollingCardHeight?{height:rollingCardHeight,minHeight:rollingCardHeight}:undefined}>Evaluating . . .</article>:recent?entry(recent,true):<div className="empty">No rolls yet.</div>)}
     </section>
     <section className="ledger" aria-label="Roll history">
       <button type="button" className="section-heading section-toggle" aria-expanded={!collapsed.history} onClick={()=>toggle('history')}><span className="section-label"><span className="chevron" aria-hidden="true">{collapsed.history?'▸':'▾'}</span><strong>History</strong></span>{collapsed.history&&<span className="collapsed-history" ref={historyPreviewRef}>{older.map((item,index)=><span className="collapsed-history-result" key={item.requestId} style={{visibility:index<historyPreviewCount?'visible':'hidden'}} aria-hidden={index>=historyPreviewCount}>{item.overridden?<span className="verification-preview override-indicator">OVERRIDE </span>:item.verification&&<span className={`verification-preview ${item.verification.state}`}>{item.verification.state==='verified'?'✓':'⚠'} </span>}{item.error??display(item.value)}</span>)}</span>}</button>
