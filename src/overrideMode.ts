@@ -1,15 +1,15 @@
 import { ROOM_SETTINGS_KEY, readRoomSettings, type RoomSettings } from './roomSettings';
 import { readSharedSession, SESSION_KEY, type DiceSession } from './sessionLedger';
-import { validDieOverride, type DieOverride } from './dieOverrides';
+import { normalizeOverrideDie, validDieOverride, type DieOverride } from './dieOverrides';
 
 export function validOverrideList(overrides: readonly DieOverride[]): boolean {
   return overrides.length <= 30 && overrides.every(validDieOverride)
-    && new Set(overrides.map(item=>item.die)).size === overrides.length;
+    && new Set(overrides.map(item=>normalizeOverrideDie(item.die)?.key)).size === overrides.length;
 }
 
 export function overrideTransition(metadata: Record<string,unknown>, overrides: DieOverride[], enabled: boolean,
   createId:()=>string = () => crypto.randomUUID(), now = Date.now()): {settings: RoomSettings; session: DiceSession} {
-  if(!validOverrideList(overrides))throw new Error('Enter unique dice such as d20 with a legal face value.');
+  if(!validOverrideList(overrides))throw new Error('Enter unique numeric dice with one or more legal face values.');
   const current=readRoomSettings(metadata),mode=current.overrideMode;
   const shared=readSharedSession(metadata);
   if(!shared)throw new Error('The current room session is unavailable.');

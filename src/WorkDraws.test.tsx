@@ -30,4 +30,21 @@ describe('work draw badges', () => {
     expect(html).toContain('>6</span>');
     expect(html).toContain('>5</span>');
   });
+  it('does not let streak rarity style an individual die badge', () => {
+    const result={resolution:{dice:[{die:'d20',dieIndex:0,face:20,kind:'initial' as const}]}} as RollResult;
+    const streak={type:'streak-rarity' as const,tier:'legendary' as const,probability:.0001,label:'Streak'};
+    const html=renderToStaticMarkup(<WorkDraws result={result} indices={[0]} moments={[streak]}/>);
+    expect(html).toContain('class="work-draw"');
+    expect(html).not.toContain('rarity-legendary');
+  });
+  it('colors explosion triggers by their chain position',()=>{
+    const result={resolution:{dice:[
+      {die:'d6!',dieIndex:0,face:6,kind:'initial' as const,exploded:true,explosionNumber:1},
+      {die:'d6!',dieIndex:0,face:6,kind:'explosion' as const,exploded:true,explosionNumber:2},
+      {die:'d6!',dieIndex:0,face:6,kind:'explosion' as const,exploded:true,explosionNumber:3},
+      {die:'d6!',dieIndex:0,face:6,kind:'explosion' as const,exploded:true,explosionNumber:4},
+    ]}} as RollResult;
+    const html=renderToStaticMarkup(<WorkDraws result={result} indices={[0,1,2,3]} moments={[]}/>);
+    for(const color of ['#e3535a','#ee913d','#e4c443','#ffffff'])expect(html).toContain(`--rarity-color:${color}`);
+  });
 });

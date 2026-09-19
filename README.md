@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.33.1.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.37.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -214,3 +214,17 @@ Version 0.32.2 removes duplicate work stages for explosion-capable dice when the
 Version 0.33.0 holds result evaluation for one calculation frame when a draw triggers an explosion and paints an expanding white ring from that badge across the result-window background. The effect runs only in the result window and respects reduced-motion preferences. This compatible visual feature does not change roll results or the broadcast protocol.
 
 Version 0.33.1 replaces the small explosion exclamation marker with a persistent burst behind each triggering die badge. The badge face masks the burst center so its edges remain visible in both Show Work and the result window. This compatible visual fix does not change roll results or the broadcast protocol.
+
+Version 0.34.0 left-aligns the result label while keeping the result pill centered in the result window. Nonordinary result rarity receives an extra post-result frame with a yellow, orange, red, or white expanding ring centered on the pill; streak rarity sweeps a matching bar across it. Reveal completion and auto-dismiss wait for that frame, and reduced-motion mode skips it. This compatible visual feature does not change roll results or the broadcast protocol.
+
+Version 0.34.1 moves the streak rarity sweep from the result pill to the full final-result area below its divider. The full-height sweep travels left to right behind the result content with a long tier-colored trailing fade. This compatible visual fix does not change roll results or the broadcast protocol.
+
+Version 0.35.0 gives nonordinary individual die-rarity badges the same held-frame expanding ring used by rare final results. Rings originate at each qualifying badge and use yellow, orange, red, or white by tier; multiple qualifying badges on one work step animate together. Explosion-only badges retain a white ring. This compatible visual feature does not change roll results or the broadcast protocol.
+
+Version 0.35.1 strictly isolates individual die badges and their rings to die-rarity moments. Result-rarity and streak-rarity moments cannot color, label, or animate a die badge; streak rarity remains confined to the final-result area sweep. This compatible visual fix does not change roll results or the broadcast protocol.
+
+Version 0.35.2 centralizes rarity colors in src/rarity.ts and corrects their order to unusual red, exceptional orange, extraordinary yellow, and legendary white. Die badges, result borders, streak underlines, expanding rings, and streak sweeps all use this shared palette. This compatible visual fix does not change rarity thresholds, roll results, or the broadcast protocol.
+
+Version 0.36.0 records each trigger's position in an explosion chain and colors its badge and expanding ring from the shared rarity palette: first red, second orange, third yellow, and fourth or later white. Explosion-chain color takes visual precedence over probability rarity on a triggering badge without changing the underlying rarity analysis. The optional explosion-number draw annotation keeps existing version 1 consumers compatible.
+
+Version 0.37.0 expands room Override Mode to static numeric custom dice such as `d{0..100}` and `d{-1,0,1}`. Each override accepts an ordered, comma-separated face sequence such as `6,6,5,1`; matching draws consume the sequence in order and repeat it, including pool draws, rerolls, explosions, and fairness samples. Existing single-value override metadata remains readable and behaves as a one-value repeating sequence. This is a compatible extension of the existing roll protocol because roll records and probability calculations are unchanged.

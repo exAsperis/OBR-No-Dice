@@ -78,9 +78,10 @@ export function GMSettings({ settings, verifiableRollsAvailable = false }: { set
     if (!speedText.trim() || !valid(next)) { setError('Complete each shortcut and use a calculation speed from 0 to 10000.'); return; }
     change(next); void save(next);
   };
-  const updateOverride = (index:number,field:keyof DieOverride,value:string) => {
+  const updateOverride = (index:number,field:'die'|'values',value:string) => {
     const mode=draftRef.current.overrideMode??{enabled:false,overrides:[]};
-    const overrides=mode.overrides.map((item,position)=>position===index?{...item,[field]:field==='value'?Number(value):value.trim().toLowerCase()}:item);
+    const overrides=mode.overrides.map((item,position)=>position===index?{...item,[field]:field==='values'
+      ? value.split(',').map(part=>part.trim()===''?Number.NaN:Number(part.trim())) : value.trim().toLowerCase()}:item);
     change({...draftRef.current,overrideMode:{...mode,overrides}});
   };
   const removeOverride=(index:number)=>{
@@ -90,7 +91,7 @@ export function GMSettings({ settings, verifiableRollsAvailable = false }: { set
   };
   const toggleOverride=async(enabled:boolean)=>{
     const overrides=draftRef.current.overrideMode?.overrides??[];
-    if(!validOverrideList(overrides)){setError('Enter unique dice such as d20 with a legal face value.');return;}
+    if(!validOverrideList(overrides)){setError('Enter unique numeric dice with comma-separated legal face values.');return;}
     setSaving(true);setError('');
     const task=queue.current.catch(()=>{}).then(async()=>{
       if(await OBR.player.getRole()!=='GM')throw new Error('Only the GM can change Override Mode.');
@@ -116,13 +117,13 @@ export function GMSettings({ settings, verifiableRollsAvailable = false }: { set
     {draft.verifiableRollsEnabled && <p className="verification-status" role="status">{saving?'Updating room setting…':verifiableRollsAvailable?'Ready — a compatible No Dice peer is reachable.':'Waiting for a compatible No Dice peer to respond.'}</p>}
     <h3>Override Mode</h3>
     <Toggle checked={draft.overrideMode?.enabled??false} disabled={saving} onChange={enabled=>void toggleOverride(enabled)}>Override Mode</Toggle>
-    <p>Configured dice use the chosen face for every player. Rolls go into a disposable OVERRIDE session.</p>
+    <p>Configured numeric dice repeat their chosen face sequence for every player. Rolls go into a disposable OVERRIDE session.</p>
     <div className="override-editor">{(draft.overrideMode?.overrides??[]).map((item,index)=><div className="override-editor-row" key={index}>
       <input aria-label={`Override ${index+1} die`} placeholder="d20" value={item.die} onChange={event=>updateOverride(index,'die',event.target.value)} onBlur={()=>void save()}/>
-      <input aria-label={`Override ${index+1} value`} type="number" step="1" value={item.value} onChange={event=>updateOverride(index,'value',event.target.value)} onBlur={()=>void save()}/>
+      <input aria-label={`Override ${index+1} values`} placeholder="6,6,5,1" value={(item.values??(item.value===undefined?[]:[item.value])).join(',')} onChange={event=>updateOverride(index,'values',event.target.value)} onBlur={()=>void save()}/>
       <button type="button" aria-label={`Remove override ${index+1}`} onClick={()=>removeOverride(index)}>×</button>
     </div>)}</div>
-    <div className="settings-actions"><button type="button" disabled={(draft.overrideMode?.overrides.length??0)>=30} onClick={()=>{const mode=draftRef.current.overrideMode??{enabled:false,overrides:[]};change({...draftRef.current,overrideMode:{...mode,overrides:[...mode.overrides,{die:'',value:1}]}});}}>Add Override</button></div>
+    <div className="settings-actions"><button type="button" disabled={(draft.overrideMode?.overrides.length??0)>=30} onClick={()=>{const mode=draftRef.current.overrideMode??{enabled:false,overrides:[]};change({...draftRef.current,overrideMode:{...mode,overrides:[...mode.overrides,{die:'',values:[1]}]}});}}>Add Override</button></div>
     <h3>Shortcut buttons</h3>
     <div className="shortcut-editor">{draft.shortcuts.map((item, index) => <div className="shortcut-editor-row" key={index}>
       <input aria-label={`Shortcut ${index + 1} name`} maxLength={32} value={item.label} onChange={event => updateShortcut(index, 'label', event.target.value)} onBlur={() => void save()} placeholder="Name" />

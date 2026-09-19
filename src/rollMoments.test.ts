@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { rarityTier } from './rarity';
+import { explosionColor, RARITY_COLORS, rarityColor, rarityTier } from './rarity';
 import { analyzeRollMoments } from './rollMoments';
 import { normalizeExpression, type StoredRoll } from './sessionLedger';
 import { rollExpression } from './rollService';
@@ -22,6 +22,13 @@ describe('roll rarity', () => {
       expect(rarityTier(threshold)).toBe(tier);
       expect(rarityTier(threshold+threshold*.00001)).toBe(above);
     }
+  });
+  it('defines the shared rarity palette from red through white',()=>{
+    expect(RARITY_COLORS).toEqual({unusual:'#e3535a',exceptional:'#ee913d',extraordinary:'#e4c443',legendary:'#ffffff'});
+    expect(rarityColor('ordinary')).toBeUndefined();
+  });
+  it('maps explosion chain depth through the shared palette',()=>{
+    expect([1,2,3,4,8].map(explosionColor)).toEqual(['#e3535a','#ee913d','#e4c443','#ffffff','#ffffff']);
   });
   it('uses inclusive die tails, including both extremes', () => {
     for (const [expression,index,tier] of [['d20',0,'unusual'],['d20',19,'unusual'],['d20',1,undefined],['d20',18,undefined],['d100',0,'exceptional'],['d100',99,'exceptional'],['d6',0,undefined],['d6',5,undefined]] as const) {

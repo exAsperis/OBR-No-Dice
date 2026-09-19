@@ -36,6 +36,7 @@ describe('whole-expression presentation', () => {
     expect(result.stageDice).toEqual(['','d6','','d6','','d6','','']);
     expect(result.stageDrawIndices).toEqual([[],[0],[],[1],[],[2],[],[]]);
     expect(result.dice?.map(draw=>draw.exploded??false)).toEqual([true,true,false]);
+    expect(result.dice?.map(draw=>draw.explosionNumber)).toEqual([1,2,undefined]);
   });
   it('presents separate draws across an exploding pool', () => {
     const result=roll(parse('2d6!'),fixed(5,4,2));

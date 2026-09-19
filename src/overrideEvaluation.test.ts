@@ -5,9 +5,10 @@ import { distribution } from './engine/probability';
 import { parse } from './engine/parser';
 import { analyzeRollMoments } from './rollMoments';
 import { normalizeExpression, type StoredRoll } from './sessionLedger';
+import type { DieOverride } from './dieOverrides';
 
-const overrides=[{die:'d20',value:20},{die:'d6',value:6}];
-const execute=(expression:string,configured=overrides,random=0,dialect:'nodice'|'roll20'='nodice')=>
+const overrides:DieOverride[]=[{die:'d20',value:20},{die:'d6',value:6}];
+const execute=(expression:string,configured:DieOverride[]=overrides,random=0,dialect:'nodice'|'roll20'='nodice')=>
   rollExpression({requestId:expression,expression,dialect,visibility:'everyone',playerId:'p',playerName:'P',overridden:true,overrides:configured},{integer:()=>random}).record;
 
 describe('Override Mode evaluation',()=>{
@@ -28,6 +29,20 @@ describe('Override Mode evaluation',()=>{
     const exploded=execute('d6!2',[{die:'d6',value:6}]);
     expect(exploded.value).toBe(18);
     expect(exploded.resolution?.dice.map(draw=>draw.face)).toEqual([6,6,6]);
+  });
+  it('matches numeric custom dice and cycles ordered values across every draw',()=>{
+    expect(execute('d{0..100}',[{die:'d{0..100}',values:[0,100]}]).value).toBe(0);
+    expect(execute('d{0..100}',[{die:'d{0..100}',values:[0,100]}]).value).toBe(100);
+    expect(execute('3d{-1,0,1}',[{die:'d{-1,0,1}',values:[1,0,-1]}]).value).toBe(0);
+    expect(execute('4d6',[{die:'d6',values:[6,6,5,1]}]).resolution?.dice.map(draw=>draw.face)).toEqual([6,6,5,1]);
+    expect(execute('4d6',[{die:'d6',values:[6,6,5,1]}]).resolution?.dice.map(draw=>draw.face)).toEqual([6,6,5,1]);
+  });
+  it('uses the sequence for rerolls and explosion continuations',()=>{
+    const rerolled=execute('d6ro=1',[{die:'d6',values:[1,4]}],0,'roll20');
+    expect(rerolled.resolution?.dice.map(draw=>draw.face)).toEqual([1,4]);
+    const exploded=execute('d6!2',[{die:'d6',values:[6,5]}]);
+    expect(exploded.resolution?.dice.map(draw=>draw.face)).toEqual([6,5]);
+    expect(exploded.value).toBe(11);
   });
   it('keeps theoretical probability normal while observed sampling is forced',()=>{
     const chart=distribution(parse('d20'));

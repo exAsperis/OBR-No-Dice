@@ -288,6 +288,7 @@ OBR.onReady(async () => {
             visibility: original.visibility, playerId, playerName: await OBR.player.getName(),
             label: original.label, source: original.source,
             overridden,overrides:overridden?snapshot.settings.overrideMode?.overrides:undefined,
+            overrideSequenceKey:overridden?snapshot.session?.id:undefined,
           };
           const enabled = !overridden&&snapshot.settings.verifiableRollsEnabled;
           const verification = enabled ? (await verifier.roll(input)).verification : undefined;
@@ -326,6 +327,7 @@ OBR.onReady(async () => {
       requestId, expression, visibility: 'everyone', playerId,
       playerName: await OBR.player.getName(), label, source: 'external-api',overridden,
       overrides:overridden?snapshot.settings.overrideMode?.overrides:undefined,
+      overrideSequenceKey:overridden?snapshot.session?.id:undefined,
     });},
     record: async completed => {
       const snapshot=await roomSnapshot();

@@ -1,7 +1,7 @@
 import { EXTENSION_ID } from './constants';
 import { DICE_SHORTCUTS } from './shortcuts';
 import { REVEAL_LINE_INTERVAL_MS } from './revealLines';
-import { validDieOverride, type DieOverride } from './dieOverrides';
+import { normalizeDieOverride, type DieOverride } from './dieOverrides';
 import type { DiceSession } from './sessionLedger';
 
 export const ROOM_SETTINGS_KEY = `${EXTENSION_ID}/room-settings`;
@@ -28,10 +28,11 @@ export function readRoomSettings(metadata: Record<string, unknown>): RoomSetting
     ? value.shortcuts.map(item => ({ label: item.label.trim(), term: item.term.trim() }))
     : DEFAULT_ROOM_SETTINGS.shortcuts;
   const mode = value.overrideMode;
+  const normalizedOverrides = Array.isArray(mode?.overrides) ? mode.overrides.map(normalizeDieOverride) : [];
   const overrides = Array.isArray(mode?.overrides) && mode.overrides.length <= 30
-    && mode.overrides.every(item => item && typeof item.die === 'string' && validDieOverride(item))
-    && new Set(mode.overrides.map(item => item.die)).size === mode.overrides.length
-    ? mode.overrides.map(item => ({die:item.die,value:item.value})) : [];
+    && normalizedOverrides.every((item): item is DieOverride => item !== undefined)
+    && new Set(normalizedOverrides.map(item => item.die)).size === normalizedOverrides.length
+    ? normalizedOverrides : [];
   const session = (candidate: unknown): DiceSession | undefined => {
     if (!candidate || typeof candidate !== 'object') return undefined;
     const item = candidate as Partial<DiceSession>;

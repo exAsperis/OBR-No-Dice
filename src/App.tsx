@@ -285,6 +285,7 @@ export default function App() {
         requestId:req.requestId,expression:req.expression,dialect:req.dialect,visibility:v,
         playerId:obr.playerId??'',playerName:obr.playerName??'Player',label:req.label,source:req.source,
         overridden,overrides:overridden?currentSettings.overrideMode?.overrides:undefined,
+        overrideSequenceKey:overridden?shared?.id:undefined,
       };
       const verification=local&&!overridden&&currentSettings.verifiableRollsEnabled&&obr.roomId&&obr.playerId&&verifierChannel.current
         ? await new Promise<RollResult['verification']|undefined>(resolve=>{

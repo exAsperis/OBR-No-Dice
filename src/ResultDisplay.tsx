@@ -4,7 +4,8 @@ import type { RollResult } from './protocol';
 import { displayValue } from './rollService';
 import { resultHeading } from './expressionName';
 import type { RollMoment } from './rollMoments';
-import { rarestTier } from './rarity';
+import { rarestTier, rarityColor } from './rarity';
+import type { CSSProperties } from 'react';
 import './resultDisplay.css';
 
 export function ResultDisplay({ result, announce = false, moments = [] }: { result: RollResult; announce?: boolean; moments?: RollMoment[] }) {
@@ -37,10 +38,11 @@ export function ResultDisplay({ result, announce = false, moments = [] }: { resu
   const resultTier=rarestTier(moments.filter(moment=>moment.type==='result-rarity').map(moment=>moment.tier));
   const streakTier=rarestTier(moments.filter(moment=>moment.type==='streak-rarity').map(moment=>moment.tier));
   return <div className={`roll-result${verification?.state === 'verified' ? ' verified' : ''}`} role={announce ? 'status' : undefined}>
-    <span className="roll-result-heading">{result.error ? 'ERROR' : resultHeading(result.expression)}:</span>
-    {result.overridden && <span className="override-indicator">OVERRIDE</span>}
-    {verification && <button ref={trigger} type="button" className={`verification-check ${verification.state}`} aria-label={verification.state === 'verified' ? 'Show verification details' : 'Show verification failure details'} aria-expanded={open} onClick={() => setOpen(value => !value)}>{verification.state === 'verified' ? '✓' : '!'}</button>}
-    <span className="roll-result-value"><strong className={`roll-result-pill${resultTier==='ordinary'?'':` rarity-border rarity-${resultTier}`}`}>{result.error ?? displayValue(result.value)}</strong>{streakTier!=='ordinary'&&<span className={`roll-result-streak rarity-${streakTier}`}/>}</span>
+    <span className="roll-result-heading-group"><span className="roll-result-heading">{result.error ? 'ERROR' : resultHeading(result.expression)}:</span>
+      {result.overridden && <span className="override-indicator">OVERRIDE</span>}
+      {verification && <button ref={trigger} type="button" className={`verification-check ${verification.state}`} aria-label={verification.state === 'verified' ? 'Show verification details' : 'Show verification failure details'} aria-expanded={open} onClick={() => setOpen(value => !value)}>{verification.state === 'verified' ? '✓' : '!'}</button>}
+    </span>
+    <span className="roll-result-value"><strong className={`roll-result-pill${resultTier==='ordinary'?'':` rarity-border rarity-${resultTier}`}`} style={resultTier==='ordinary'?undefined:{'--rarity-color':rarityColor(resultTier)} as CSSProperties}>{result.error ?? displayValue(result.value)}</strong>{streakTier!=='ordinary'&&<span className={`roll-result-streak rarity-${streakTier}`} style={{'--rarity-color':rarityColor(streakTier)} as CSSProperties}/>}</span>
     {result.interpretation && <span className="roll-result-interpretation">{result.interpretation}</span>}
     {open && verification && createPortal(<div ref={popover} className="verification-popover" role="region" aria-label="Verification details" style={position}>
       <div className="verification-popover-title">{verification.state === 'verified' ? 'Verified roll' : 'Verification failed'}</div>

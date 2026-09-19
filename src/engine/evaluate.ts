@@ -14,7 +14,7 @@ export const cryptoRng:Rng={integer(maxExclusive){
   return value%maxExclusive;
 }};
 export type Value=Facet|Facet[];
-export interface DieDraw { die: string; dieIndex: number; face: Facet; kind: 'initial'|'reroll'|'explosion'; nodeSpan?:{start:number;end:number}; facetIndex?:number; exploded?:boolean }
+export interface DieDraw { die: string; dieIndex: number; face: Facet; kind: 'initial'|'reroll'|'explosion'; nodeSpan?:{start:number;end:number}; facetIndex?:number; exploded?:boolean; explosionNumber?:number }
 export interface Evaluation {value:Value;trace:string[];stages:string[];stageDice?:string[];stageDrawIndices?:number[][];interpretation?:string;dice?:DieDraw[]}
 type Context='scalar'|'pool-source';
 /** One budget follows the entire roll, including dynamic parameters and nested facets. */
@@ -122,7 +122,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
           const limit=drawn.explosion.limit??100,unbounded=drawn.explosion.limit===undefined;
           let extra=0;const chain:Facet[]=[];
           while(drawn.explosion&&extra<limit){
-            const triggerIndex=budget.dice.length-1;budget.dice[triggerIndex].exploded=true;
+            const triggerIndex=budget.dice.length-1;budget.dice[triggerIndex].exploded=true;budget.dice[triggerIndex].explosionNumber=extra+1;
             chain.push(face);
             if(showStages){const terms=[...chain.slice(0,-1).map(String),marked(face,true)];presentation.replace(node,progress(terms.join(' + '),results));presentation.show(unitDie,[triggerIndex]);presentation.replace(node,progress(`${chain.map(String).join(' + ')} + ${continuationDie}`,results));presentation.show();}
             extra++;drawKind='explosion';drawn=draw();face=drawn.value;trace.push(`explode → ${face}`);settleFacetRerolls();value=number(value)+number(face);

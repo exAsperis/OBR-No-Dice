@@ -63,9 +63,9 @@ describe('GM settings editor', () => {
     render(<GMSettings settings={{calculationSpeedMs:500,shortcuts:[],verifiableRollsEnabled:true,overrideMode:{enabled:false,overrides:[]}}}/>);
     fireEvent.click(screen.getByText('Add Override'));
     fireEvent.change(screen.getByLabelText('Override 1 die'),{target:{value:'d20'}});
-    fireEvent.change(screen.getByLabelText('Override 1 value'),{target:{value:'20'}});
-    fireEvent.blur(screen.getByLabelText('Override 1 value'));
-    await waitFor(()=>expect(state.saved.at(-1)).toEqual(expect.objectContaining({[ROOM_SETTINGS_KEY]:expect.objectContaining({overrideMode:{enabled:false,overrides:[{die:'d20',value:20}]}})})));
+    fireEvent.change(screen.getByLabelText('Override 1 values'),{target:{value:'20,19'}});
+    fireEvent.blur(screen.getByLabelText('Override 1 values'));
+    await waitFor(()=>expect(state.saved.at(-1)).toEqual(expect.objectContaining({[ROOM_SETTINGS_KEY]:expect.objectContaining({overrideMode:{enabled:false,overrides:[{die:'d20',values:[20,19]}]}})})));
     fireEvent.click(screen.getByLabelText('Override Mode'));
     await waitFor(()=>expect(state.saved.at(-1)).toEqual(expect.objectContaining({[SESSION_KEY]:expect.objectContaining({name:'OVERRIDE',kind:'override'}),[ROOM_SETTINGS_KEY]:expect.objectContaining({verifiableRollsEnabled:false})})));
     expect((screen.getByLabelText('Verifiable Rolls') as HTMLInputElement).disabled).toBe(true);

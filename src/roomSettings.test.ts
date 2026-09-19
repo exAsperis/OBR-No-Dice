@@ -17,4 +17,12 @@ describe('room settings', () => {
     const malformed=readRoomSettings({[ROOM_SETTINGS_KEY]:{overrideMode:{enabled:true,overrides:[],previousSession:{id:'same',name:'Game',startedAt:1},overrideSession:{id:'same',name:'OVERRIDE',startedAt:2,kind:'override'}}}});
     expect(malformed.overrideMode?.enabled).toBe(false);
   });
+  it('normalizes custom terms, sequences, and legacy single values',()=>{
+    const settings=readRoomSettings({[ROOM_SETTINGS_KEY]:{overrideMode:{enabled:false,overrides:[
+      {die:'d{0,1,2,3}',values:[3,0]},{die:'d{-1,0,1}',value:-1},
+    ]}}});
+    expect(settings.overrideMode?.overrides).toEqual([
+      {die:'d{0..3}',values:[3,0]},{die:'d{-1..1}',values:[-1]},
+    ]);
+  });
 });

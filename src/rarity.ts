@@ -12,6 +12,22 @@ export const RARITY_THRESHOLDS = {
     legendary: 0.0001,
 } as const;
 
+export const RARITY_COLORS: Record<Exclude<RarityTier,'ordinary'>,string> = {
+  unusual: '#e3535a',
+  exceptional: '#ee913d',
+  extraordinary: '#e4c443',
+  legendary: '#ffffff',
+};
+
+export const rarityColor = (tier: RarityTier): string | undefined => tier === 'ordinary' ? undefined : RARITY_COLORS[tier];
+
+export const explosionColor = (explosionNumber: number): string => {
+  if (explosionNumber <= 1) return RARITY_COLORS.unusual;
+  if (explosionNumber === 2) return RARITY_COLORS.exceptional;
+  if (explosionNumber === 3) return RARITY_COLORS.extraordinary;
+  return RARITY_COLORS.legendary;
+};
+
 export function rarityTier(probability: number): RarityTier {
   if (probability <= RARITY_THRESHOLDS.legendary) return 'legendary';
   if (probability <= RARITY_THRESHOLDS.extraordinary) return 'extraordinary';
