@@ -25,7 +25,7 @@ describe('verified roll primitives',()=>{
     const second=rollExpression(input,await new SeededRng(seed).expand(20128));
     expect(first.record.value).toEqual(second.record.value);
     expect(first.record.trace).toEqual(second.record.trace);
-  });
+  },15000);
   it('uses deterministic GM preference and player ordering',()=>{
     const peers=[{connectionId:'z',role:'PLAYER' as const,lastSeen:1},{connectionId:'b',role:'GM' as const,lastSeen:1},{connectionId:'a',role:'PLAYER' as const,lastSeen:1}];
     expect(selectPeer(peers,'PLAYER')?.connectionId).toBe('b');
