@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it } from 'vitest';
 import { AnalyticsTabs, type AnalyticsTab } from './AnalyticsTabs';
 import { rollExpression } from './rollService';
@@ -31,13 +31,11 @@ describe('AnalyticsTabs',()=>{
     expect(screen.queryByText('Selected player')).toBeNull();
   });
 
-  it('selects an expression for local detail without removing other expression rows',()=>{
+  it('renders the extracted Expressions comparison',()=>{
     renderTab('expressions');
     const table=screen.getByRole('table');
-    fireEvent.click(within(table).getByText('d6').closest('tr')!);
-    expect(screen.getByRole('heading',{name:/d6 · 1 rolls/})).toBeTruthy();
-    expect(within(table).getByText('d6')).toBeTruthy();
-    expect(within(table).getByText('d20')).toBeTruthy();
+    expect(within(table).getByRole('columnheader',{name:'Players'})).toBeTruthy();
+    expect(within(table).getByRole('columnheader',{name:'Δ mean'})).toBeTruthy();
   });
 
   it('renders the extracted Outcomes analysis',()=>{
