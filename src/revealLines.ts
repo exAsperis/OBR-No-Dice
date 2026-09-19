@@ -9,6 +9,10 @@ const compact = (line: string) => line.length > 100 ? `${line.slice(0, 99)}…` 
 
 export interface RevealLine { text: string; final: boolean; die?: string; drawIndices?: number[] }
 
+export function revealLineExploded(line: RevealLine | undefined, result: RollResult): boolean {
+  return Boolean(line?.drawIndices?.some(index=>result.resolution?.dice[index]?.exploded));
+}
+
 export function reductionDiff(previous: string, next: string) {
   let start = 0;
   while (start < previous.length && start < next.length && previous[start] === next[start]) start++;

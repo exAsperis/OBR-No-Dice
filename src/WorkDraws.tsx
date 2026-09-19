@@ -7,7 +7,7 @@ export function WorkDraws({ result, indices, moments }: { result: RollResult; in
     const draw = result.resolution?.dice[index];
     if (!draw) return null;
     const moment = moments.find(item => item.type === 'die-rarity' && item.drawIndex === index);
-    return <span key={index} className={`work-draw${moment ? ` rarity-${moment.tier}` : ''}`} title={moment?.label ?? `${draw.die} → ${String(draw.face)}`}>{String(draw.face)}</span>;
+    return <span key={index} className={`work-draw${moment ? ` rarity-${moment.tier}` : ''}${draw.exploded?' work-draw-exploded':''}`} title={moment?.label ?? `${draw.die} → ${String(draw.face)}`}><span className="work-draw-face">{String(draw.face)}</span></span>;
   })}</span>;
 }
 

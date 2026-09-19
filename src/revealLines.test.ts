@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { nextRevealCount, REVEAL_LINE_INTERVAL_MS, reductionDiff, revealLines } from './revealLines';
+import { nextRevealCount, REVEAL_LINE_INTERVAL_MS, reductionDiff, revealLineExploded, revealLines } from './revealLines';
 import type { RollResult } from './protocol';
 import { parse } from './engine/parser';
 import { roll } from './engine/evaluate';
@@ -42,5 +42,11 @@ describe('roll reveal lines', () => {
     const outcome=roll(parse('H[2d20]'),{integer:()=>[6,8][index++]});
     const lines=revealLines({...base,expression:'H[2d20]',steps:outcome.stages,stepDice:outcome.stageDice,stepDrawIndices:outcome.stageDrawIndices});
     expect(lines.find(line=>line.text==='H[7,9]')).toMatchObject({die:'2d20 →',drawIndices:[0,1],final:false});
+  });
+  it('identifies only a work frame whose draw triggered an explosion', () => {
+    const ast=parse('d6!');
+    const result={...base,resolution:{ast,dice:[{die:'d6!',dieIndex:0,face:6,kind:'initial',exploded:true},{die:'d6!',dieIndex:0,face:4,kind:'explosion'}]}} as RollResult;
+    expect(revealLineExploded({text:'[6!]',final:false,drawIndices:[0]},result)).toBe(true);
+    expect(revealLineExploded({text:'6 + [4]',final:false,drawIndices:[1]},result)).toBe(false);
   });
 });

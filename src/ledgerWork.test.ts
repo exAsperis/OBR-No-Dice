@@ -46,4 +46,12 @@ describe('three-column ledger work', () => {
     const rows=ledgerWorkRows(record('H[2d20]',[6,8]));
     expect(rows.find(row=>row.expression==='H[7,9]')).toMatchObject({die:'2d20 →',drawIndices:[0,1]});
   });
+  it('keeps every exploding draw and the final total as separate work rows', () => {
+    const rows=ledgerWorkRows(record('d6!',[5,5,4]));
+    expect(rows.map(row=>[row.die,row.expression,row.drawIndices])).toEqual([
+      ['','d6!',undefined],['d6 →','[6!]',[0]],['','6 + d6!',undefined],
+      ['d6 →','6 + [6!]',[1]],['','6 + 6 + d6!',undefined],
+      ['d6 →','6 + 6 + [5]',[2]],['','6 + 6 + 5',undefined],['','17',undefined],
+    ]);
+  });
 });

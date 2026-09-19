@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.31.3.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.33.1.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -204,3 +204,13 @@ Version 0.31.1 aligns the die term, draw badges, and expression in shared column
 Version 0.31.2 groups each die term with its draw badges in one wrapping cell in Show Work and the timed result window. Evaluated expressions remain in their own column. This compatible layout fix does not change roll results or the broadcast protocol.
 
 Version 0.31.3 keeps unchanged trailing expression text visible during result-window reduction animations. For example, the + 2 remains visible when 2d6+2 becomes [6, 5] + 2. This compatible visual fix does not change roll results or the broadcast protocol.
+
+Version 0.32.0 presents exploding dice one draw at a time in Show Work and the timed result window. Each triggering face expands into the next die term, each follow-up receives its own badge, and triggering badges carry a small bang marker and reduced-motion-aware pop effect. Roll results add only an optional deterministic xploded annotation to structured die draws, so existing version 1 consumers remain compatible.
+
+Version 0.32.1 anchors result-window work at the top and reveals subsequent lines downward. The window continues to follow the newest line when the work exceeds the available height. This compatible visual fix does not change roll results or the broadcast protocol.
+
+Version 0.32.2 removes duplicate work stages for explosion-capable dice when the rolled face does not trigger an explosion. A nontriggering d6! now presents one draw step followed by its resolved value. This compatible presentation fix does not change roll results or the broadcast protocol.
+
+Version 0.33.0 holds result evaluation for one calculation frame when a draw triggers an explosion and paints an expanding white ring from that badge across the result-window background. The effect runs only in the result window and respects reduced-motion preferences. This compatible visual feature does not change roll results or the broadcast protocol.
+
+Version 0.33.1 replaces the small explosion exclamation marker with a persistent burst behind each triggering die badge. The badge face masks the burst center so its edges remain visible in both Show Work and the result window. This compatible visual fix does not change roll results or the broadcast protocol.

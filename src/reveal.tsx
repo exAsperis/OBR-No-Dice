@@ -5,7 +5,7 @@ import { applyOwlbearTheme } from './theme';
 import { EXTENSION_ID } from './constants';
 import { isResult, type RollResult } from './protocol';
 import { isLocalMessage, LOCAL_CHANNEL, REVEAL_POPOVER_ID, type LocalMessage } from './revealProtocol';
-import { nextRevealCount, reductionDiff, revealLines } from './revealLines';
+import { nextRevealCount, reductionDiff, revealLineExploded, revealLines } from './revealLines';
 import { DEFAULT_ROOM_SETTINGS, readRoomSettings } from './roomSettings';
 import type { Distribution } from './engine/probability';
 import { Toggle } from './Toggle';
@@ -90,10 +90,13 @@ function Reveal() {
   const [dismissTiming, setDismissTiming] = useState<{ requestId: string; deadline: number; remainingMs: number; startScale: number } | null>(null);
   const [calculationSpeedMs, setCalculationSpeedMs] = useState(DEFAULT_ROOM_SETTINGS.calculationSpeedMs);
   const [finishedRequestId, setFinishedRequestId] = useState<string | null>(null);
+  const [explosionRing,setExplosionRing]=useState<{key:string;left:number;top:number}|null>(null);
   const [moments, setMoments] = useState<{requestId:string; items:RollMoment[]}>({requestId:'',items:[]});
   const channel = useRef<BroadcastChannel | null>(null);
   const identity = useRef<{ roomId: string; playerId: string } | null>(null);
   const list = useRef<HTMLDivElement | null>(null);
+  const shell = useRef<HTMLElement | null>(null);
+  const pausedExplosionFrames=useRef(new Set<string>());
   const dragStart = useRef<{ x: number; y: number } | null>(null);
   const progress = useRef<{ requestId: string; count: number } | null>(null);
   const resumeDeadline = useRef<number | null>(null);
@@ -126,7 +129,7 @@ function Reveal() {
         progress.current={requestId:event.data.result.requestId,count:resumed};
         resumeDeadline.current=Number.isFinite(event.data.resume?.dismissDeadline) ? event.data.resume!.dismissDeadline! : null;
         setDismissTiming(null);
-        if (newResult) setFinishedRequestId(null);
+        if (newResult) { setFinishedRequestId(null); setExplosionRing(null); pausedExplosionFrames.current.clear(); }
         setVisibleCount(resumed);
         setHighlightedRequestId(event.data.resume?.highlighted?event.data.result.requestId:null);
         setRerolling(false);
@@ -144,7 +147,13 @@ function Reveal() {
     let shown = progress.current?.requestId === result.requestId ? progress.current.count : 1;
     if (shown >= total) return;
     if (calculationSpeedMs === 0) { progress.current = { requestId: result.requestId, count: total }; setVisibleCount(total); return; }
+    const reducedMotion=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     const timer = window.setInterval(() => {
+      const pauseKey=`${result.requestId}:${shown}`;
+      if(!reducedMotion&&revealLineExploded(lines[shown-1],result)&&!pausedExplosionFrames.current.has(pauseKey)){
+        pausedExplosionFrames.current.add(pauseKey);
+        return;
+      }
       shown = nextRevealCount(shown, total);
       progress.current = { requestId: result.requestId, count: shown };
       setVisibleCount(shown);
@@ -184,6 +193,13 @@ function Reveal() {
   }, [result]);
   const lines = useMemo(() => result ? revealLines(result) : [], [result]);
   const visible = lines.slice(0, visibleCount);
+  useLayoutEffect(()=>{
+    const surface=shell.current,current=list.current?.children.item(visibleCount-1);
+    const badge=current?.querySelector<HTMLElement>('.work-draw-exploded');
+    if(!surface||!badge||!result||calculationSpeedMs===0||window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;
+    const outer=surface.getBoundingClientRect(),source=badge.getBoundingClientRect();
+    setExplosionRing({key:`${result.requestId}:${visibleCount}`,left:source.left-outer.left+source.width/2,top:source.top-outer.top+source.height/2});
+  },[visibleCount,result,calculationSpeedMs]);
   useEffect(() => {
     if (result && visibleCount >= lines.length && identity.current
       && (calculationSpeedMs === 0 || window.matchMedia('(prefers-reduced-motion: reduce)').matches || finishedRequestId === result.requestId))
@@ -232,8 +248,9 @@ function Reveal() {
     channel.current?.postMessage({ type: 'reroll', ...identity.current, requestId: result.requestId } satisfies LocalMessage);
   }
 
-  return <main className={`reveal-shell${calculationSpeedMs === 0 ? ' instant' : ''}`} aria-label="Roll result">
+  return <main ref={shell} className={`reveal-shell${calculationSpeedMs === 0 ? ' instant' : ''}`} style={{'--ring-duration':`${Math.max(220,calculationSpeedMs)}ms`} as CSSProperties} aria-label="Roll result">
     <div key={autoDismiss && dismissTiming ? `${dismissTiming.requestId}:${dismissTiming.deadline}` : `waiting:${result?.requestId}`} className={'dismiss-curtain'+(autoDismiss && dismissTiming?' running':'')} style={autoDismiss && dismissTiming ? { '--drain-duration': `${dismissTiming.remainingMs}ms`, '--drain-start': dismissTiming.startScale } as CSSProperties : undefined} aria-hidden="true"/>
+    {explosionRing&&<span key={explosionRing.key} className="reveal-explosion-ring" style={{'--ring-left':`${explosionRing.left}px`,'--ring-top':`${explosionRing.top}px`} as CSSProperties} onAnimationEnd={()=>setExplosionRing(null)} aria-hidden="true"/>}
     <header className="reveal-header" onPointerDown={event=>{if((event.target as HTMLElement).closest('button'))return;dragStart.current={x:event.screenX,y:event.screenY};event.currentTarget.setPointerCapture(event.pointerId);}} onPointerUp={event=>{const start=dragStart.current;dragStart.current=null;if(start&&identity.current){const dx=event.screenX-start.x,dy=event.screenY-start.y;if(Math.abs(dx)+Math.abs(dy)>5)channel.current?.postMessage({type:'move',...identity.current,dx,dy,visibleCount,highlighted:highlightedRequestId===result?.requestId,dismissDeadline:dismissTiming?.deadline} satisfies LocalMessage);}}} onPointerCancel={()=>{dragStart.current=null;}}><div><strong>NO DICE</strong>{result&&<span>{result.playerName}</span>}</div><button type="button" onClick={dismiss} aria-label="Dismiss roll result">×</button></header>
     <div className="reveal-controls"><button type="button" onClick={reroll} disabled={!result || rerolling}>{rerolling ? 'Rolling…' : 'Reroll'}</button><Toggle checked={autoDismiss} onChange={enabled => { setAutoDismiss(enabled); localStorage.setItem(DISMISS_ENABLED_KEY, String(enabled)); }}>Auto-dismiss</Toggle><label htmlFor="dismiss-seconds">Seconds</label><input id="dismiss-seconds" type="number" min="1" max="3600" step="1" value={dismissSeconds} disabled={!autoDismiss} onChange={event => { const seconds = Number(event.target.value); if (!Number.isInteger(seconds) || seconds < 1 || seconds > 3600) return; setDismissSeconds(seconds); localStorage.setItem(DISMISS_SECONDS_KEY, String(seconds)); }} /></div>
     {rerollError && <div className="reveal-error" role="alert">{rerollError}</div>}

@@ -30,4 +30,23 @@ describe('whole-expression presentation', () => {
     const result = roll(parse('(d4+d6)d8'), fixed(1, 2, 0, 1, 2, 3, 4));
     expect(result.stages.slice(0, 4)).toEqual(['(d4+d6)d8', '(2 + d6)d8', '(2 + 3)d8', '5d8']);
   });
+  it('presents each exploding draw as its own reduction', () => {
+    const result=roll(parse('d6!'),fixed(5,5,4));
+    expect(result.stages).toEqual(['d6!','[6!]','6 + d6!','6 + [6!]','6 + 6 + d6!','6 + 6 + [5]','6 + 6 + 5','17']);
+    expect(result.stageDice).toEqual(['','d6','','d6','','d6','','']);
+    expect(result.stageDrawIndices).toEqual([[],[0],[],[1],[],[2],[],[]]);
+    expect(result.dice?.map(draw=>draw.exploded??false)).toEqual([true,true,false]);
+  });
+  it('presents separate draws across an exploding pool', () => {
+    const result=roll(parse('2d6!'),fixed(5,4,2));
+    expect(result.stages).toEqual(['2d6!','[6!, d6!]','[6 + d6!, d6!]','[6 + 3, d6!]','[9, 5]','14']);
+    expect(result.stageDrawIndices).toEqual([[],[0],[],[1],[2],[]]);
+  });
+  it('presents a nontriggering exploding die exactly once', () => {
+    const result=roll(parse('d6!'),fixed(3));
+    expect(result.stages).toEqual(['d6!','[4]','4']);
+    expect(result.stageDice).toEqual(['','d6','']);
+    expect(result.stageDrawIndices).toEqual([[],[0],[]]);
+    expect(result.dice?.map(draw=>draw.exploded??false)).toEqual([false]);
+  });
 });

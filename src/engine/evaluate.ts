@@ -14,7 +14,7 @@ export const cryptoRng:Rng={integer(maxExclusive){
   return value%maxExclusive;
 }};
 export type Value=Facet|Facet[];
-export interface DieDraw { die: string; dieIndex: number; face: Facet; kind: 'initial'|'reroll'|'explosion'; nodeSpan?:{start:number;end:number}; facetIndex?:number }
+export interface DieDraw { die: string; dieIndex: number; face: Facet; kind: 'initial'|'reroll'|'explosion'; nodeSpan?:{start:number;end:number}; facetIndex?:number; exploded?:boolean }
 export interface Evaluation {value:Value;trace:string[];stages:string[];stageDice?:string[];stageDrawIndices?:number[][];interpretation?:string;dice?:DieDraw[]}
 type Context='scalar'|'pool-source';
 /** One budget follows the entire roll, including dynamic parameters and nested facets. */
@@ -71,7 +71,12 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       const customFacets=node.die.kind==='custom-die'?node.die.facets:undefined;
       const selected=customFacets?Array.from({length:count},()=>{spend(budget);return chooseIndex();}):undefined;
       const selectedLabels=selected?.map(index=>formatFacetShort(customFacets![index]));
-      if(selectedLabels&&showStages){presentation.replace(node,show(selectedLabels));presentation.show(formatShort(node));}
+      if(selectedLabels&&showStages&&customFacets!.some(facet=>facet.kind!=='value')){presentation.replace(node,show(selectedLabels));presentation.show(formatShort(node));}
+      const continuationDie=formatShort({...node,quantity:{kind:'literal',value:1,span:node.quantity.span}});
+      const unitDie=formatShort({...node,quantity:{kind:'literal',value:1,span:node.quantity.span},die:node.die.kind==='standard-die'?{...node.die,explodeHighest:undefined}:{...node.die,facets:node.die.facets.map(facet=>({...facet,explosion:undefined}))}});
+      const explodingTerm=node.die.kind==='standard-die'?Boolean(node.die.explodeHighest):node.die.facets.some(facet=>Boolean(facet.explosion));
+      const progress=(current:string,completed:Facet[])=>count===1?current:`[${[...completed.map(String),current,...Array.from({length:count-completed.length-1},()=>continuationDie)].join(', ')}]`;
+      const marked=(face:Facet,bang=false)=>count===1?`[${String(face)}${bang?'!':''}]`:`${String(face)}${bang?'!':''}`;
       let drawKind:DieDraw['kind']='initial', dieIndex=0;
       const draw=(preselected?:number):{value:Facet;explosion?:Explosion;facetReroll?:Explosion;index:number}=>{
         if(preselected===undefined)spend(budget);
@@ -94,6 +99,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
         trace.push(`facet result → ${rendered}`);budget.dice.push({die:formatShort(node),dieIndex,face:rendered,kind:drawKind,nodeSpan:node.span,facetIndex:index});return {value:rendered,index,explosion:facet.explosion,facetReroll:facet.facetReroll};
       };
       for(let i=0;i<count;i++){
+        const firstDieDraw=budget.dice.length;
         dieIndex=i;drawKind='initial';
         let drawn=draw(selected?.[i]),face=drawn.value;trace.push(`die ${i+1} → ${face}`);
         if(node.reroll){
@@ -114,19 +120,28 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
         let value:Facet=face;
         if(drawn.explosion){
           const limit=drawn.explosion.limit??100,unbounded=drawn.explosion.limit===undefined;
-          let extra=0;
+          let extra=0;const chain:Facet[]=[];
           while(drawn.explosion&&extra<limit){
+            const triggerIndex=budget.dice.length-1;budget.dice[triggerIndex].exploded=true;
+            chain.push(face);
+            if(showStages){const terms=[...chain.slice(0,-1).map(String),marked(face,true)];presentation.replace(node,progress(terms.join(' + '),results));presentation.show(unitDie,[triggerIndex]);presentation.replace(node,progress(`${chain.map(String).join(' + ')} + ${continuationDie}`,results));presentation.show();}
             extra++;drawKind='explosion';drawn=draw();face=drawn.value;trace.push(`explode → ${face}`);settleFacetRerolls();value=number(value)+number(face);
           }
           if(unbounded&&extra===100&&drawn.explosion)throw new ExpressionError('Explosion safety limit reached');
+          const finalIndex=budget.dice.length-1;
+          if(showStages){const terms=[...chain.map(String),marked(face)];presentation.replace(node,progress(terms.join(' + '),results));presentation.show(unitDie,[finalIndex]);presentation.replace(node,progress([...chain.map(String),String(face)].join(' + '),results));presentation.show();}
           trace.push(`die ${i+1} total → ${value}`);
+        } else if(explodingTerm&&showStages){
+          const drawIndex=budget.dice.length-1;
+          presentation.replace(node,progress(marked(face),results));presentation.show(unitDie,[drawIndex]);
+          presentation.replace(node,progress(String(face),results));presentation.show();
         }
         results.push(value);
-        if(selectedLabels&&showStages){selectedLabels[i]=String(value);presentation.replace(node,show(selectedLabels));presentation.show(customFacets![selected![i]].kind==='expression'?formatFacetShort(customFacets![selected![i]]):'');}
+        if(selectedLabels&&showStages&&!explodingTerm){selectedLabels[i]=String(value);presentation.replace(node,show(selectedLabels));if(!budget.dice.slice(firstDieDraw).some(draw=>draw.kind==='explosion'))presentation.show(customFacets![selected![i]].kind==='expression'?formatFacetShort(customFacets![selected![i]]):'');}
       }
       trace.push(`${formatShort(node)} → ${show(results)}`);
       const resolution=plan.modeFor(node);
-      presentation.replace(node,show(results));if(showStages&&!operand)presentation.show(formatShort(node),Array.from({length:budget.dice.length-firstDraw},(_,i)=>firstDraw+i));
+      presentation.replace(node,show(results));if(showStages&&!operand&&!explodingTerm)presentation.show(formatShort(node),Array.from({length:budget.dice.length-firstDraw},(_,i)=>firstDraw+i));
       if(resolution==='pool')return {value:results,trace,stages:presentation.stages};
       if(results.every(v=>typeof v==='number')){const value=results.reduce<number>((a,b)=>a+(b as number),0);presentation.replace(node,String(value));if(showStages)presentation.show(operand?formatShort(node):'');return {value,trace:[...trace,`sum → ${value}`],stages:presentation.stages};}
       if(node.resolution==='sum')throw new ExpressionError('Symbolic dice cannot be summed');

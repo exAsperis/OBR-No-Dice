@@ -23,4 +23,11 @@ describe('work draw badges', () => {
     expect(html).toContain('10d6 →');
     expect(html.match(/class="work-draw"/g)).toHaveLength(10);
   });
+  it('marks only draws that trigger an explosion', () => {
+    const result={resolution:{dice:[{die:'d6!',dieIndex:0,face:6,kind:'initial' as const,exploded:true},{die:'d6!',dieIndex:0,face:5,kind:'explosion' as const}]}} as RollResult;
+    const html=renderToStaticMarkup(<WorkDraws result={result} indices={[0,1]} moments={[]}/>);
+    expect(html.match(/work-draw-exploded/g)).toHaveLength(1);
+    expect(html).toContain('>6</span>');
+    expect(html).toContain('>5</span>');
+  });
 });
