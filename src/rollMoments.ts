@@ -1,4 +1,4 @@
-import type { Node } from './engine/ast';
+import type { Explosion, Node } from './engine/ast';
 import type { DieDraw } from './engine/evaluate';
 import { distribution, type Distribution } from './engine/probability';
 import type { StoredRoll } from './sessionLedger';
@@ -51,6 +51,55 @@ export function dieTailProbability(draw: DieDraw, node: Extract<Node, {kind:'dic
   return Math.min(faces.filter(value => value <= face).length, faces.filter(value => value >= face).length) / faces.length;
 }
 
+/** Exact inclusive tail for a simple summed pool with unlimited highest-face explosions or unlimited rerolls. */
+function unlimitedDiceTail(node: Node, value: number): number | undefined {
+  while (node.kind === 'interpret' || node.kind === 'group' || node.kind === 'resolve') node = node.kind === 'interpret' ? node.expression : node.value;
+  if (node.kind !== 'dice' || node.resolution === 'pool' || node.quantity.kind !== 'literal') return undefined;
+  let sides:number,explosion:Explosion|undefined,facetReroll:Explosion|undefined;
+  if(node.die.kind==='standard-die'){
+    if(node.die.sides.kind!=='literal')return undefined;
+    sides=node.die.sides.value;explosion=node.die.explodeHighest;facetReroll=node.die.rerollLowest;
+  }else{
+    const values=node.die.facets.map(facet=>facet.kind==='value'&&typeof facet.value==='number'?facet.value:undefined);
+    if(values.some(face=>face===undefined)||!values.every((face,index)=>face===index+1))return undefined;
+    sides=values.length;
+    explosion=node.die.facets[sides-1]?.explosion;
+    facetReroll=node.die.facets[0]?.facetReroll;
+    if(node.die.facets.some((facet,index)=>(facet.explosion&&index!==sides-1)||(facet.facetReroll&&index!==0)))return undefined;
+  }
+  const count=node.quantity.value;
+  if (!Number.isInteger(count) || count < 1 || count > 100 || !Number.isInteger(sides) || sides < 2 || sides > 1000 || !Number.isInteger(value)) return undefined;
+  const conditionalReroll=node.reroll&&!node.reroll.once?node.reroll:undefined;
+  if (node.reroll?.once || explosion?.limit !== undefined || facetReroll?.limit !== undefined || (node.reroll&&!conditionalReroll)) return undefined;
+  if (!explosion && !facetReroll && !conditionalReroll) return undefined;
+  const matches=(face:number)=>conditionalReroll ? conditionalReroll.comparator==='='?face===conditionalReroll.target:conditionalReroll.comparator==='<'?face<conditionalReroll.target:conditionalReroll.comparator==='<='?face<=conditionalReroll.target:conditionalReroll.comparator==='>'?face>conditionalReroll.target:face>=conditionalReroll.target : Boolean(facetReroll&&face===1);
+  const faces=Array.from({length:sides},(_,index)=>index+1).filter(face=>!matches(face));
+  if (!faces.length) return undefined;
+  const one=new Map<number,number>();
+  const add=(total:number,probability:number)=>one.set(total,(one.get(total)??0)+probability);
+  const faceProbability=1/faces.length;
+  const terminalFaces=faces.filter(face=>face!==sides||!explosion);
+  if(!terminalFaces.length)return undefined;
+  for(const face of faces){
+    if(face===sides&&explosion){
+      let prefix=0,continuation=1;
+      while(prefix+sides+Math.min(...terminalFaces)<=value){
+        prefix+=sides;continuation*=faceProbability;
+        for(const terminal of terminalFaces)add(prefix+terminal,continuation*faceProbability);
+      }
+    } else add(face,faceProbability);
+  }
+  let totals=new Map<number,number>([[0,1]]);
+  for(let die=0;die<count;die++){
+    const next=new Map<number,number>();
+    for(const [sum,p] of totals)for(const [face,fp] of one)if(sum+face<=value)next.set(sum+face,(next.get(sum+face)??0)+p*fp);
+    totals=next;
+  }
+  const low=[...totals.entries()].reduce((sum,[result,p])=>sum+(result<=value?p:0),0);
+  const below=[...totals.entries()].reduce((sum,[result,p])=>sum+(result<value?p:0),0);
+  return Math.min(low,1-below);
+}
+
 export function analyzeRollMoments(rolls: StoredRoll[], cache = new Map<string, Distribution | null>()): Map<string, RollMoment[]> {
   const moments = new Map<string, RollMoment[]>();
   const streaks = new Map<string, {value:string;length:number}>();
@@ -97,6 +146,12 @@ export function analyzeRollMoments(rolls: StoredRoll[], cache = new Map<string, 
           const tier = rarityTier(probability);
           if (tier !== 'ordinary') found.push({type:'streak-rarity',tier,probability,label:`${length} in a row`,streakLength:length});
         }
+      }
+    } else if (!chart && typeof value === 'number' && Number.isFinite(value)) {
+      const probability=unlimitedDiceTail(roll.resolution.ast,value);
+      if (probability !== undefined) {
+        const tier = rarityTier(probability);
+        if (tier !== 'ordinary') found.push({type:'result-rarity',tier,probability,label:`Result ${value}`});
       }
     }
     moments.set(roll.id, found);

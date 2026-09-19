@@ -43,6 +43,19 @@ describe('roll rarity', () => {
       expect(moment([roll],'result-rarity')?.tier).toBe(tier);
     }
   });
+  it('does not suppress result rarity for unlimited explosions or rerolls', () => {
+    const ordinaryExplosion=record('4d4!',[0,0,1,2]);
+    expect(ordinaryExplosion.finalResult).toBe(7);
+    expect(moment([ordinaryExplosion],'result-rarity')).toBeUndefined();
+    const explosion=record('4d4!',[...Array(18).fill(3),0,0,0,0]);
+    expect(explosion.finalResult).toBe(76);
+    expect(distribution(explosion.resolution.ast,true)).toBeNull();
+    expect(moment([explosion],'result-rarity')).toMatchObject({tier:'legendary'});
+    const reroll=record('6d4r',Array(6).fill(3));
+    expect(reroll.finalResult).toBe(24);
+    expect(distribution(reroll.resolution.ast,true)).toBeNull();
+    expect(moment([reroll],'result-rarity')).toMatchObject({tier:'exceptional'});
+  });
   it('tracks successive uses per player and expression using exact result probability', () => {
     const first=record('d20',[19]);
     const otherExpression=record('2d6',[2,3]);

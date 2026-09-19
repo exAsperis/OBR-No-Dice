@@ -67,19 +67,18 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       const chooseIndex=()=>{const forced=budget.options?.dieOverride?.({node,faceCount});if(forced===undefined)return rng.integer(faceCount);if(!Number.isInteger(forced)||forced<0||forced>=faceCount)throw new ExpressionError('Override value is not a legal die face');return forced;};
       const results:Facet[]=[];const trace=[...quantity.trace,...(sides?.trace??[])];
       const initialFaces:Facet[]=[];const initialDrawIndices:number[]=[];const rerollBatches:Array<{faces:Facet[];drawIndices:number[]}>=[];
+      const explosionStarts:Array<{face:Facet;drawIndex:number;explodes:boolean}>=[];
+      const explosionBatches:Array<{faces:Facet[];drawIndices:number[];dieIndices:number[];explodes:boolean[]}>=[];
       const recordReroll=(attempt:number,face:Facet,index:number)=>{const batch=rerollBatches[attempt]??={faces:[],drawIndices:[]};batch.faces.push(face);batch.drawIndices.push(index);};
+      const recordExplosion=(attempt:number,die:number,face:Facet,index:number,explodes:boolean)=>{const batch=explosionBatches[attempt]??={faces:[],drawIndices:[],dieIndices:[],explodes:[]};batch.faces.push(face);batch.drawIndices.push(index);batch.dieIndices.push(die);batch.explodes.push(explodes);};
       // Select all initial custom facets before evaluating their expressions.
       // This makes each facet's nested rolls visible in left-to-right order.
       const customFacets=node.die.kind==='custom-die'?node.die.facets:undefined;
       const selected=customFacets?Array.from({length:count},()=>{spend(budget);return chooseIndex();}):undefined;
       const selectedLabels=selected?.map(index=>formatFacetShort(customFacets![index]));
       if(selectedLabels&&showStages&&customFacets!.some(facet=>facet.kind!=='value')){presentation.replace(node,show(selectedLabels));presentation.show(formatShort(node));}
-      const continuationDie=formatShort({...node,quantity:{kind:'literal',value:1,span:node.quantity.span}});
-      const unitDie=formatShort({...node,quantity:{kind:'literal',value:1,span:node.quantity.span},die:node.die.kind==='standard-die'?{...node.die,explodeHighest:undefined}:{...node.die,facets:node.die.facets.map(facet=>({...facet,explosion:undefined}))}});
       const explodingTerm=node.die.kind==='standard-die'?Boolean(node.die.explodeHighest):node.die.facets.some(facet=>Boolean(facet.explosion));
       const rerollableTerm=Boolean(node.reroll||node.die.kind==='standard-die'&&node.die.rerollLowest||node.die.kind==='custom-die'&&node.die.facets.some(facet=>Boolean(facet.facetReroll)));
-      const progress=(current:string,completed:Facet[])=>count===1?current:`[${[...completed.map(String),current,...Array.from({length:count-completed.length-1},()=>continuationDie)].join(', ')}]`;
-      const marked=(face:Facet,bang=false)=>count===1?`[${String(face)}${bang?'!':''}]`:`${String(face)}${bang?'!':''}`;
       let drawKind:DieDraw['kind']='initial', dieIndex=0;
       const draw=(preselected?:number):{value:Facet;explosion?:Explosion;facetReroll?:Explosion;index:number}=>{
         if(preselected===undefined)spend(budget);
@@ -121,6 +120,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
           }
         };
         settleFacetRerolls();
+        explosionStarts.push({face,drawIndex:budget.dice.length-1,explodes:Boolean(drawn.explosion)});
         let value:Facet=face;
         if(drawn.explosion){
           const limit=drawn.explosion.limit??100,unbounded=drawn.explosion.limit===undefined;
@@ -128,20 +128,26 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
           while(drawn.explosion&&extra<limit){
             const triggerIndex=budget.dice.length-1;budget.dice[triggerIndex].exploded=true;budget.dice[triggerIndex].explosionNumber=extra+1;
             chain.push(face);
-            if(showStages){const terms=[...chain.slice(0,-1).map(String),marked(face,true)];presentation.replace(node,progress(terms.join(' + '),results));presentation.show(unitDie,[triggerIndex]);presentation.replace(node,progress(`${chain.map(String).join(' + ')} + ${continuationDie}`,results));presentation.show();}
             extra++;drawKind='explosion';drawn=draw();face=drawn.value;trace.push(`explode → ${face}`);settleFacetRerolls();value=number(value)+number(face);
+            recordExplosion(extra-1,i,face,budget.dice.length-1,Boolean(drawn.explosion));
           }
           if(unbounded&&extra===100&&drawn.explosion)throw new ExpressionError('Explosion safety limit reached');
-          const finalIndex=budget.dice.length-1;
-          if(showStages){const terms=[...chain.map(String),marked(face)];presentation.replace(node,progress(terms.join(' + '),results));presentation.show(unitDie,[finalIndex]);presentation.replace(node,progress([...chain.map(String),String(face)].join(' + '),results));presentation.show();}
           trace.push(`die ${i+1} total → ${value}`);
-        } else if(explodingTerm&&showStages){
-          const drawIndex=budget.dice.length-1;
-          presentation.replace(node,progress(marked(face),results));presentation.show(unitDie,[drawIndex]);
-          presentation.replace(node,progress(String(face),results));presentation.show();
         }
         results.push(value);
         if(selectedLabels&&showStages&&!explodingTerm&&!rerollableTerm){selectedLabels[i]=String(value);presentation.replace(node,show(selectedLabels));if(!budget.dice.slice(firstDieDraw).some(draw=>draw.kind==='explosion'))presentation.show(customFacets![selected![i]].kind==='expression'?formatFacetShort(customFacets![selected![i]]):'');}
+      }
+      if(explodingTerm&&showStages){
+        const terms=explosionStarts.map(start=>String(start.face));
+        presentation.replace(node,show(explosionStarts.map(start=>`${String(start.face)}${start.explodes?'!':''}`)));
+        presentation.show(formatShort(node),explosionStarts.map(start=>start.drawIndex));
+        explosionBatches.forEach(batch=>{
+          batch.faces.forEach((face,index)=>{const die=batch.dieIndices[index];terms[die]=`${terms[die].replace(/!$/,'')} + ${String(face)}${batch.explodes[index]?'!':''}`;});
+          presentation.replace(node,show(terms));
+          const explosionDie={...node,quantity:{kind:'literal' as const,value:batch.faces.length,span:node.quantity.span},die:node.die.kind==='standard-die'?{...node.die,explodeHighest:undefined}:{...node.die,facets:node.die.facets.map(facet=>({...facet,explosion:undefined}))}};
+          presentation.show(formatShort(explosionDie),batch.drawIndices);
+        });
+        presentation.replace(node,show(results));presentation.show();
       }
       if(rerollBatches.length&&showStages){
         const initial=initialFaces.map((value,index)=>budget.dice[initialDrawIndices[index]]?.rerolled?`${value}r${node.die.kind==='custom-die'?node.die.facets.find(facet=>facet.kind==='value'&&facet.value===value)?.facetReroll?.limit??'':node.die.rerollLowest?.limit??''}`:value);
