@@ -18,10 +18,12 @@ function Table({rows,total}:{rows:{value:number|string;count:number;expected?:nu
 function Card({label,value}:{label:string;value:ReactNode}){return <div className="stat-card"><small>{label}</small><strong>{value}</strong></div>;}
 export function AnalyticsTabs({tab,rolls,sessionRolls,session,sessionName,roomId,viewerId}:{tab:AnalyticsTab;rolls:StoredRoll[];sessionRolls:StoredRoll[];session:DiceSession|undefined;sessionName:string;roomId:string;viewerId:string}){
   const [mode,setMode]=useState<'results'|'dice'>('results');const [die,setDie]=useState('');const [fairKey,setFairKey]=useState('');const [selectedPlayerId,setSelectedPlayerId]=useState('');const [selectedExpressionId,setSelectedExpressionId]=useState('');
-  const box=useMemo(()=>summary(rolls),[rolls]);const players=useMemo(()=>playerStats(rolls),[rolls]);const expressions=useMemo(()=>expressionStats(rolls),[rolls]);
-  const types=useMemo(()=>[...new Set(rolls.flatMap(r=>r.resolution.dice.map(d=>dieType(r,d))))].sort(),[rolls]);
-  const outcomes=useMemo(()=>outcomeDistribution(rolls,mode,mode==='dice'?die||types[0]:undefined),[rolls,mode,die,types]);
-  const highlightsData=useMemo(()=>highlights(rolls),[rolls]);const activity=useMemo(()=>timeline(rolls),[rolls]);const fair=useMemo(()=>fairness(rolls,fairKey),[rolls,fairKey]);
+  const box=useMemo(()=>summary(rolls),[rolls]);
+  const players=useMemo<ReturnType<typeof playerStats>>(()=>tab==='players'?playerStats(rolls):[],[tab,rolls]);
+  const expressions=useMemo<ReturnType<typeof expressionStats>>(()=>tab==='expressions'||tab==='fairness'?expressionStats(rolls):[],[tab,rolls]);
+  const types=useMemo(()=>tab==='outcomes'?[...new Set(rolls.flatMap(r=>r.resolution.dice.map(d=>dieType(r,d))))].sort():[],[tab,rolls]);
+  const outcomes=useMemo(()=>tab==='outcomes'?outcomeDistribution(rolls,mode,mode==='dice'?die||types[0]:undefined):{rows:[],count:0,min:undefined,max:undefined,mean:null,median:null,modes:[]},[tab,rolls,mode,die,types]);
+  const highlightsData=useMemo(()=>tab==='highlights'?highlights(rolls):{rare:null,largest:null,explosion:null,highStreak:null,lowStreak:null,naturalMin:null,naturalMax:null},[tab,rolls]);const activity=useMemo(()=>tab==='timeline'?timeline(rolls):{bucket:60_000,points:[] as {time:number;count:number}[]},[tab,rolls]);const fair=useMemo(()=>tab==='fairness'?fairness(rolls,fairKey):null,[tab,rolls,fairKey]);
   const selectedPlayer=players.find(player=>player.id===selectedPlayerId);const selectedExpression=expressions.find(expression=>expression.id===selectedExpressionId);
   const playerDetail=useMemo(()=>selectedPlayer?{box:summary(selectedPlayer.list),events:highlights(selectedPlayer.list)}:null,[selectedPlayer]);
   if(tab==='ledger')return <LedgerTab rolls={rolls} sessionRolls={sessionRolls} session={session} roomId={roomId} viewerId={viewerId}/>;
