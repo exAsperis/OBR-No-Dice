@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.46.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.47.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -252,3 +252,5 @@ Version 0.44.0 redesigns Statistics Players as a horizontal comparison table and
 Version 0.45.0 replaces the Statistics Timeline histogram with clock-aligned 10-minute bands of chronological roll markers. Marker color follows the live local Owlbear player-color registry and marker size uses exact or estimated normalized percentiles without making rarity claims. Stored sessions, rolls, expression syntax, and public broadcast/API formats are unchanged.
 
 Version 0.46.0 makes the Timeline band duration user-selectable in minutes, retaining 10 minutes as the default, and condenses consecutive runs of two or more empty bands into labeled gap rows. Stored sessions, rolls, expression syntax, and public broadcast/API formats are unchanged.
+
+Version 0.47.0 redesigns Outcomes around tab-local Ledger-semantic filters, distinct final-result and selected-die analyses, observed distributions, descriptive summaries, and Results-only interpretation frequencies. Stored sessions, rolls, expression syntax, and public broadcast/API formats are unchanged.

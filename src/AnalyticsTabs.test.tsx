@@ -39,4 +39,11 @@ describe('AnalyticsTabs',()=>{
     expect(within(table).getByText('d6')).toBeTruthy();
     expect(within(table).getByText('d20')).toBeTruthy();
   });
+
+  it('renders the extracted Outcomes analysis',()=>{
+    renderTab('outcomes');
+    expect(screen.getByRole('heading',{name:'Outcomes'})).toBeTruthy();
+    expect(screen.getByLabelText('Expression regex')).toBeTruthy();
+    expect(screen.getByText('2 of 2 session rolls match the current filters.')).toBeTruthy();
+  });
 });
