@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.49.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.50.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -258,3 +258,5 @@ Version 0.47.0 redesigns Outcomes around tab-local Ledger-semantic filters, dist
 Version 0.48.0 redesigns Expressions as a normalized-expression comparison view with dialect-aware grouping, observed numeric summaries, and exact-only theoretical distribution comparisons. Stored sessions, rolls, expression syntax, and public broadcast/API formats are unchanged.
 
 Version 0.49.0 redesigns Highlights around shared exact rarity moments, normalized percentile extrema, genuine initial dice pools, streaks, explosion chains, and sliding session-pace bursts. Stored sessions, rolls, expression syntax, and public broadcast/API formats are unchanged.
+
+Version 0.50.0 completes the Statistics redesign with an exact-only Fairness explorer featuring per-player populations, observed-versus-expected tables, approximate sampling bands, selectable recent windows, outside-support tracking, and a cumulative midpoint-percentile trend. Stored sessions, rolls, expression syntax, and public broadcast/API formats are unchanged.

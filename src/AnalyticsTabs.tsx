@@ -1,6 +1,6 @@
-import { useMemo, useState, type ReactNode } from 'react';
+import { useMemo, type ReactNode } from 'react';
 import type { DiceSession, StoredRoll } from './sessionLedger';
-import { expressionStats, fairness, summary } from './analytics';
+import { summary } from './analytics';
 import { LedgerTab } from './LedgerTab';
 import { PlayerName } from './components/PlayerName';
 import { PlayersTab } from './PlayersTab';
@@ -8,23 +8,19 @@ import { TimelineTab } from './TimelineTab';
 import { OutcomesTab } from './OutcomesTab';
 import { ExpressionsTab } from './ExpressionsTab';
 import { HighlightsTab } from './HighlightsTab';
+import { FairnessTab } from './FairnessTab';
 
 export type AnalyticsTab='overview'|'players'|'expressions'|'outcomes'|'highlights'|'timeline'|'ledger'|'fairness';
 export const tabs:AnalyticsTab[]=['overview','players','expressions','outcomes','highlights','timeline','ledger','fairness'];
-const pct=(v:number|null|undefined)=>v==null?'—':`${(v*100).toFixed(1)}%`;
 const n=(v:number|null|undefined)=>v==null?'—':Number.isInteger(v)?String(v):v.toFixed(2);
 const when=(v:number|undefined)=>v==null?'—':new Date(v).toLocaleString();
 const span=(v:number)=>v<60_000?`${Math.round(v/1000)} sec`:v<3_600_000?`${(v/60_000).toFixed(1)} min`:`${(v/3_600_000).toFixed(1)} hr`;
 const name=(roomId:string,viewerId:string,id:string,label:string)=><PlayerName roomId={roomId} viewerId={viewerId} playerId={id} name={label}/>;
 const ranked=(r:{names:string[];count:number}|null,rolls:StoredRoll[],roomId:string,viewerId:string)=>r? <>{r.names.map((label,index)=><span key={`${label}-${index}`}>{index>0&&' and '}{name(roomId,viewerId,rolls.find(item=>item.rollerName===label)?.rollerId??label,label)}</span>)} — {r.count}</>:'—';
 const rankedText=(r:{names:string[];count:number}|null)=>r?`${r.names.join(' and ')} — ${r.count}`:'—';
-function Table({rows,total}:{rows:{value:number|string;count:number;expected?:number}[];total:number}){const expected=rows.some(r=>r.expected!==undefined);return <div className="stat-scroll"><table><thead><tr><th>Outcome</th><th>Count</th><th>Observed %</th>{expected&&<th>Expected %</th>}</tr></thead><tbody>{rows.slice(0,200).map(r=><tr key={`${typeof r.value}:${r.value}`}><td>{r.value}</td><td>{r.count}</td><td>{pct(total?r.count/total:null)}</td>{expected&&<td>{pct(r.expected)}</td>}</tr>)}</tbody></table>{rows.length>200&&<p>Showing first 200 of {rows.length} outcomes.</p>}</div>;}
 function Card({label,value}:{label:string;value:ReactNode}){return <div className="stat-card"><small>{label}</small><strong>{value}</strong></div>;}
 export function AnalyticsTabs({tab,rolls,session,sessionName,roomId,viewerId}:{tab:AnalyticsTab;rolls:StoredRoll[];session:DiceSession|undefined;sessionName:string;roomId:string;viewerId:string}){
-  const [fairKey,setFairKey]=useState('');
   const box=useMemo(()=>summary(rolls),[rolls]);
-  const expressions=useMemo<ReturnType<typeof expressionStats>>(()=>tab==='fairness'?expressionStats(rolls):[],[tab,rolls]);
-  const fair=useMemo(()=>tab==='fairness'?fairness(rolls,fairKey):null,[tab,rolls,fairKey]);
   if(tab==='ledger')return <LedgerTab rolls={rolls} session={session} roomId={roomId} viewerId={viewerId}/>;
   if(tab==='overview')return <><h2>{sessionName}</h2><div className="headline-stats"><div><strong>{box.rolls}</strong><span>rolls</span></div><div><strong>{box.dice}</strong><span>dice</span></div><div><strong>{box.players}</strong><span>rollers</span></div><div><strong>{box.expressions}</strong><span>expressions</span></div></div><section className="stat-grid"><Card label="🟢 First roll" value={when(box.first)}/><Card label="🏁 Last roll" value={when(box.last)}/><Card label="⌛ Elapsed" value={box.rolls?span(box.duration):'—'}/><Card label="🕐 Rolls/hour" value={n(box.perHour)}/><Card label="🤸 Most active roller" value={ranked(box.most,rolls,roomId,viewerId)}/><Card label="🥱 Least active roller" value={ranked(box.least,rolls,roomId,viewerId)}/><Card label="🔁 Most-used expression" value={rankedText(box.expression)}/><Card label="🎲 Most common die" value={rankedText(box.die)}/><Card label="⏳ Longest gap" value={box.rolls>1?span(box.longestGap):'—'}/><Card label="😅 Busiest 10 minutes" value={`${box.busiestTen.count} rolls`}/></section></>;
   if(tab==='players')return <PlayersTab rolls={rolls} roomId={roomId} viewerId={viewerId}/>;
@@ -32,5 +28,5 @@ export function AnalyticsTabs({tab,rolls,session,sessionName,roomId,viewerId}:{t
   if(tab==='outcomes')return <OutcomesTab rolls={rolls} roomId={roomId} viewerId={viewerId}/>;
   if(tab==='highlights')return <HighlightsTab rolls={rolls} roomId={roomId} viewerId={viewerId}/>;
   if(tab==='timeline')return <TimelineTab rolls={rolls} roomId={roomId} viewerId={viewerId}/>;
-  return <><h2>Fairness explorer</h2><p className="filter-summary">Observed frequencies alongside exact theoretical probabilities. No fairness verdict is inferred.</p><label>Comparable expression <select value={fairKey} onChange={e=>setFairKey(e.target.value)}><option value="">Select an expression</option>{expressions.map(e=><option key={e.id} value={e.id}>{e.label}</option>)}</select></label>{fair?<><p><strong>Sample: {fair.sample} rolls</strong> · Recent window: {fair.recent} of 100</p><Table rows={fair.rows.map(r=>({value:r.value,count:r.observed,expected:r.expected}))} total={fair.sample}/><p className="filter-summary">Expected ranges are approximate 95% binomial ranges for this sample size.</p><div className="stat-scroll"><table><thead><tr><th>Outcome</th><th>Expected range</th></tr></thead><tbody>{fair.rows.slice(0,100).map(r=><tr key={r.value}><td>{r.value}</td><td>{r.range?pct(r.range[0])+'–'+pct(r.range[1]):'—'}</td></tr>)}</tbody></table></div><h3>Cumulative average percentile</h3><div className="activity-chart" role="img" aria-label="Cumulative average midpoint percentile over roll order">{fair.cumulative.filter((_,index)=>index%Math.max(1,Math.ceil(fair.cumulative.length/200))===0).map(point=><div key={point.roll} title={'After '+point.roll+' rolls: '+pct(point.average)} style={{height:String(Math.max(3,point.average*100))+'%'}}/>)}</div><h3>Recent window</h3><Table rows={fair.rolling.map(r=>({value:r.value,count:Math.round(r.rate*fair.recent)}))} total={fair.recent}/></>:fairKey?<p>Exact numeric theoretical distribution unavailable for this expression.</p>:<p>Select one expression to compare like outcomes.</p>}</>;
+  return <FairnessTab rolls={rolls} roomId={roomId} viewerId={viewerId}/>;
 }

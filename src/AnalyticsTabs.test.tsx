@@ -50,4 +50,10 @@ describe('AnalyticsTabs',()=>{
     expect(screen.getByRole('heading',{name:'Highlights'})).toBeTruthy();
     expect(screen.getByText('⬆ Highest normalized result')).toBeTruthy();
   });
+
+  it('renders the extracted Fairness explorer',()=>{
+    renderTab('fairness');
+    expect(screen.getByRole('heading',{name:'Fairness explorer'})).toBeTruthy();
+    expect(screen.getByLabelText('Expression')).toBeTruthy();
+  });
 });
