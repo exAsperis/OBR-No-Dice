@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.40.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.41.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -240,3 +240,5 @@ Version 0.38.0 groups exploding dice presentation the same way as rerolls: the i
 Version 0.39.0 makes each roll lifecycle transactional through reveal animation, Roll Moment visuals, and successful local-ledger persistence. Roll, Reroll, manual dismiss, auto-dismiss, and API success now wait for an explicit stored acknowledgement. API and incoming external-API presentations drain in FIFO order without replacing an active reveal; duplicate request IDs remain deduplicated, and failed entries release the queue. This changes API response timing but not the request or response wire format.
 
 Version 0.40.0 adds a browser-local registry of the latest observed Owlbear Rodeo player colors, updates it from player and party change events, and retains those colors for future historical-roll presentation. Roll records and the public roll/API wire formats are unchanged.
+
+Version 0.41.0 removes the shared Statistics player and expression filters, keeps those selections local to their respective detail tabs, and streamlines Overview by removing its highest/lowest and hot/cold sections. Roll syntax, stored rolls, ledger schema, and public broadcast/API wire formats are unchanged.
