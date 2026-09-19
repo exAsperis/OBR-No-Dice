@@ -23,13 +23,12 @@ describe('AnalyticsTabs',()=>{
     expect(screen.queryByText(/Hot and cold dice/)).toBeNull();
   });
 
-  it('selects a player for local detail without removing other player rows',()=>{
+  it('renders the Players comparison with players as columns',()=>{
     renderTab('players');
-    const table=screen.getByRole('table');
-    fireEvent.click(within(table).getByText('Alice').closest('tr')!);
-    expect(screen.getByText('Selected player')).toBeTruthy();
-    expect(within(table).getByText('Alice')).toBeTruthy();
-    expect(within(table).getByText('Bob')).toBeTruthy();
+    expect(screen.getByRole('columnheader',{name:'Alice'})).toBeTruthy();
+    expect(screen.getByRole('columnheader',{name:'Bob'})).toBeTruthy();
+    expect(screen.getByRole('rowheader',{name:'Rolls'})).toBeTruthy();
+    expect(screen.queryByText('Selected player')).toBeNull();
   });
 
   it('selects an expression for local detail without removing other expression rows',()=>{

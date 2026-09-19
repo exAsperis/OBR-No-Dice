@@ -29,4 +29,9 @@ describe('query presets',()=>{
     const analysis=buildQueryAnalysis([recordWithReroll],{pattern:'',selectedPlayers:['Joe'],result:{comparison:'any',value:0},roll:{comparison:'=',value:1,dieType:'d20'}});
     expect(analysis.matching).toBe(1);
   });
+  it('exposes numeric sum/count/mean without counting nonnumeric results',()=>{
+    const numeric=record('d6',[2]),text=record('d{Miss,Hit}',[0]);
+    const analysis=buildQueryAnalysis([numeric,text],{pattern:'',selectedPlayers:['Joe'],result:{comparison:'any',value:0},roll:{comparison:'any',value:0}}),player=analysis.players[0];
+    expect(player).toMatchObject({matching:2,numericCount:1,sum:3,mean:3});
+  });
 });

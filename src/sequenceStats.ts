@@ -4,7 +4,7 @@ import { dieType } from './analytics';
 
 export type ResultComparison=Comparison|'any';
 export interface SequenceEntry { roll:StoredRoll; order:number }
-export interface PlayerSequenceSummary { playerId:string; name:string; eligible:number; matching:number; rate:number; mean:number|null }
+export interface PlayerSequenceSummary { playerId:string; name:string; eligible:number; matching:number; rate:number; sum:number; numericCount:number; mean:number|null }
 export interface SequenceAnalysis { entries:SequenceEntry[]; players:PlayerSequenceSummary[]; eligible:number; matching:number; error?:string }
 export interface NumericCriterion { comparison:ResultComparison; value:number }
 export interface RollCriterion extends NumericCriterion { dieType?:string }
@@ -42,5 +42,5 @@ export function buildQueryAnalysis(rolls:StoredRoll[],criteria:SequenceCriteria)
     if(typeof outcome==='number'&&Number.isFinite(outcome)){summary.sum+=outcome;summary.numericCount++;}
     entries.push({roll,order:index+1});
   }
-  return {entries,eligible,matching:entries.length,players:[...players].map(([playerId,item])=>({playerId,name:item.name,eligible:item.eligible,matching:item.matching,rate:item.eligible?item.matching/item.eligible:0,mean:item.numericCount?item.sum/item.numericCount:null}))};
+  return {entries,eligible,matching:entries.length,players:[...players].map(([playerId,item])=>({playerId,name:item.name,eligible:item.eligible,matching:item.matching,rate:item.eligible?item.matching/item.eligible:0,sum:item.sum,numericCount:item.numericCount,mean:item.numericCount?item.sum/item.numericCount:null}))};
 }
