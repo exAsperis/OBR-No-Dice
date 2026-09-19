@@ -11,7 +11,7 @@ function roll(expression:string,playerId:string,face:number,time:number):StoredR
 }
 
 const rolls=[roll('d6','Alice',4,1),roll('d20','Bob',12,2)];
-const renderTab=(tab:AnalyticsTab)=>render(<AnalyticsTabs tab={tab} rolls={rolls} sessionRolls={rolls} session={undefined} sessionName="Test Session" roomId="" viewerId=""/>);
+const renderTab=(tab:AnalyticsTab)=>render(<AnalyticsTabs tab={tab} rolls={rolls} session={undefined} sessionName="Test Session" roomId="" viewerId=""/>);
 
 describe('AnalyticsTabs',()=>{
   it('keeps the session summary while omitting removed Overview sections',()=>{

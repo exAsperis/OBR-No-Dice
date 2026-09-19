@@ -52,7 +52,7 @@ function Statistics(){
     <div className="statistics-content">
       <label className="session-select">Session <select value={selected} onChange={event=>setSelected(event.target.value)}>{sessions.map(item=><option key={item.id} value={item.id}>{item.endedAt?item.name:`Current Session · ${item.name}`}</option>)}</select></label>
       <nav className="statistics-tabs" aria-label="Statistics view">{tabs.map(item=><button key={item} type="button" aria-current={tab===item?'page':undefined} onClick={()=>setTab(item)}>{item[0].toUpperCase()+item.slice(1)}</button>)}</nav>
-      <AnalyticsTabs tab={tab} rolls={rolls} sessionRolls={rolls} session={selectedSession} sessionName={selectedSession?.name??'Current Session'} roomId={identity?.room??''} viewerId={identity?.player??''}/>    </div>
+      <AnalyticsTabs tab={tab} rolls={rolls} session={selectedSession} sessionName={selectedSession?.name??'Current Session'} roomId={identity?.room??''} viewerId={identity?.player??''}/>    </div>
   </main>;
 }
 createRoot(document.getElementById('root')!).render(<StrictMode><Statistics/></StrictMode>);

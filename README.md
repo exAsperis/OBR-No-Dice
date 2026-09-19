@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.42.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.43.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -244,3 +244,5 @@ Version 0.40.0 adds a browser-local registry of the latest observed Owlbear Rode
 Version 0.41.0 removes the shared Statistics player and expression filters, keeps those selections local to their respective detail tabs, and streamlines Overview by removing its highest/lowest and hot/cold sections. Roll syntax, stored rolls, ledger schema, and public broadcast/API wire formats are unchanged.
 
 Version 0.42.0 adds estimated reference distributions for normalized percentile statistics when an exact distribution is unavailable. Exact theoretical probabilities remain required for Fairness, expression expectations, and rarity-tail claims; stored data and public API formats are unchanged.
+
+Version 0.43.0 streamlines the Statistics Ledger into a chronological, filterable record list with one roll per row, preserves its full filtering and export capabilities, and removes aggregate outcome and player-summary analysis from that tab. Stored rolls, sessions, expression syntax, and public broadcast/API formats are unchanged.
