@@ -13,7 +13,7 @@ pnpm install
 pnpm dev
 ```
 
-Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.39.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
+Then add `http://localhost:5173/manifest-local.json` in Owlbear Rodeo. Run `pnpm run check:identity`, `pnpm run typecheck`, `pnpm run test`, and `pnpm run build` before release. `manifest-v0.40.0.json` is a cache-busting alternative to the stable manifest. Releases use [Semantic Versioning](https://semver.org/spec/v2.0.0.html); the extension remains in the `0.x` development series.
 
 ## Interface
 
@@ -238,3 +238,5 @@ Version 0.37.3 preserves the user's Most Recent Result collapsed state when a ro
 Version 0.38.0 groups exploding dice presentation the same way as rerolls: the initial dice pool appears on one reveal line, and simultaneous draws in each subsequent explosion round share a line and badge group. Result Roll Moments are no longer suppressed when supported unlimited explosions or rerolls prevent a finite exact distribution; simple summed pools use their exact inclusive result tail. This changes the staged roll-result structure but not random outcomes, expression syntax, final values, or the broadcast protocol.
 
 Version 0.39.0 makes each roll lifecycle transactional through reveal animation, Roll Moment visuals, and successful local-ledger persistence. Roll, Reroll, manual dismiss, auto-dismiss, and API success now wait for an explicit stored acknowledgement. API and incoming external-API presentations drain in FIFO order without replacing an active reveal; duplicate request IDs remain deduplicated, and failed entries release the queue. This changes API response timing but not the request or response wire format.
+
+Version 0.40.0 adds a browser-local registry of the latest observed Owlbear Rodeo player colors, updates it from player and party change events, and retains those colors for future historical-roll presentation. Roll records and the public roll/API wire formats are unchanged.

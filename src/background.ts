@@ -17,11 +17,73 @@ import { readRoomSettings } from './roomSettings';
 import { SeededRng } from './verificationCrypto';
 import { MAX_ROLL_STEPS } from './engine/evaluate';
 import { PresentationQueue } from './presentationQueue';
+import { PlayerColorRegistry } from './playerColors';
 
 OBR.onReady(async () => {
   const roomId = OBR.room.id;
   const playerId = OBR.player.id;
   const role = await OBR.player.getRole();
+  const playerColors = new PlayerColorRegistry(roomId, playerId);
+
+  const rememberPartyColors = (
+    players: ReadonlyArray<{ id: string; color: string }>,
+  ) => {
+    for (const player of players) {
+      playerColors.remember(player);
+    }
+  };
+
+  const syncInitialPlayerColors = async () => {
+    const [selfColor, party] = await Promise.all([
+      OBR.player.getColor(),
+      OBR.party.getPlayers(),
+    ]);
+
+    playerColors.remember({
+      id: playerId,
+      color: selfColor,
+    });
+
+    rememberPartyColors(party);
+  };
+
+  await syncInitialPlayerColors().catch(() => {});
+
+  const unsubscribePlayerColors = OBR.player.onChange?.(player => {
+    playerColors.remember(player);
+  }) ?? (() => {});
+
+  const unsubscribePartyColors = OBR.party?.onChange?.(players => {
+    rememberPartyColors(players);
+  }) ?? (() => {});
+
+  window.addEventListener(
+    'pagehide',
+    () => {
+      unsubscribePlayerColors();
+      unsubscribePartyColors();
+    },
+    { once: true },
+  );
+
+  /**
+   * Player/party change listeners are the normal synchronization path.
+   * This fallback only queries OBR if a roller has somehow reached the
+   * ledger without ever having had a color cached.
+   */
+  const ensureRollerColor = async (rollerId: string) => {
+    if (playerColors.get(rollerId)) return;
+
+    if (rollerId === playerId) {
+      playerColors.remember({
+        id: playerId,
+        color: await OBR.player.getColor(),
+      });
+      return;
+    }
+
+    rememberPartyColors(await OBR.party.getPlayers());
+  };
   const roomSnapshot=async()=>{const metadata=await OBR.room.getMetadata();const settings=readRoomSettings(metadata),session=readSharedSession(metadata);
     if(Boolean(settings.overrideMode?.enabled)!==(session?.kind==='override')||(settings.overrideMode?.enabled&&session?.id!==settings.overrideMode.overrideSession?.id))throw new Error('Override Mode is updating. Try again.');
     return {settings,session,previous:settings.overrideMode?.enabled?settings.overrideMode.previousSession:undefined};};
@@ -266,7 +328,7 @@ OBR.onReady(async () => {
     if (message.type === 'revealed' && isResult(message.result)) {
       if(presentations.active?.requestId!==message.result.requestId||storingRequestIds.has(message.result.requestId))return;
       storingRequestIds.add(message.result.requestId);
-      void migration.then(async()=>{const snapshot=await roomSnapshot();await appendRoll(roomId,playerId,message.result,snapshot.session,snapshot.previous);ledgerEvents.postMessage({roomId,playerId});storedRequestIds.add(message.result.requestId);send({type:'stored',roomId,playerId,requestId:message.result.requestId});presentations.complete(message.result.requestId);}).catch(error=>{const detail=error instanceof Error?error.message:'Could not store roll';send({type:'storage-error',roomId,playerId,requestId:message.result.requestId,message:detail});presentations.fail(message.result.requestId,error);}).finally(()=>storingRequestIds.delete(message.result.requestId));
+      void migration.then(async()=>{const snapshot=await roomSnapshot();await ensureRollerColor(message.result.playerId).catch(()=>{});await appendRoll(roomId,playerId,message.result,snapshot.session,snapshot.previous);ledgerEvents.postMessage({roomId,playerId});storedRequestIds.add(message.result.requestId);send({type:'stored',roomId,playerId,requestId:message.result.requestId});presentations.complete(message.result.requestId);}).catch(error=>{const detail=error instanceof Error?error.message:'Could not store roll';send({type:'storage-error',roomId,playerId,requestId:message.result.requestId,message:detail});presentations.fail(message.result.requestId,error);}).finally(()=>storingRequestIds.delete(message.result.requestId));
     }
     if (message.type === 'dismiss') {
       if(current&&!storedRequestIds.has(current.requestId))return;
