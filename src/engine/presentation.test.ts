@@ -50,4 +50,14 @@ describe('whole-expression presentation', () => {
     expect(result.stageDrawIndices).toEqual([[],[0],[]]);
     expect(result.dice?.map(draw=>draw.exploded??false)).toEqual([false]);
   });
+  it('presents rerolled dice and their replacement roll separately', () => {
+    const result=roll(parse('4d4r'),fixed(0,2,3,0,1,2));
+    expect(result.stages).toContain('[1r, 3, 4, 1r]');
+    expect(result.stageDice).toContain('2d4r');
+    expect(result.stageDrawIndices?.find(indices=>indices.length===2)).toEqual([1,5]);
+    expect(result.stageDice?.filter(Boolean)).toEqual(['4d4r', '2d4r']);
+    const limited=roll(parse('4d4r2'),fixed(0,2,3,0,0,1,2));
+    expect(limited.stageDice).toContain('2d4r1');
+    expect(limited.stageDice).toContain('d4');
+  });
 });

@@ -11,7 +11,7 @@ export function WorkDraws({ result, indices, moments }: { result: RollResult; in
     if (!draw) return null;
     const moment = dieMoments.find(item => item.drawIndex === index);
     const color=draw.exploded?explosionColor(draw.explosionNumber??1):moment?rarityColor(moment.tier):undefined;
-    return <span key={index} data-draw-index={index} className={`work-draw${moment ? ` rarity-${moment.tier}` : ''}${draw.exploded?` work-draw-exploded explosion-${Math.min(draw.explosionNumber??1,4)}`:''}`} style={color?{'--rarity-color':color} as CSSProperties:undefined} title={moment?.label ?? `${draw.die} → ${String(draw.face)}`}><span className="work-draw-face">{String(draw.face)}</span></span>;
+    return <span key={index} data-draw-index={index} className={`work-draw${moment ? ` rarity-${moment.tier}` : ''}${draw.exploded?` work-draw-exploded explosion-${Math.min(draw.explosionNumber??1,4)}`:''}${draw.rerolled?' work-draw-rerolled':''}`} style={color?{'--rarity-color':color} as CSSProperties:undefined} title={moment?.label ?? `${draw.die} → ${String(draw.face)}`}><span className="work-draw-face">{String(draw.face)}</span></span>;
   })}</span>;
 }
 

@@ -14,7 +14,7 @@ export const cryptoRng:Rng={integer(maxExclusive){
   return value%maxExclusive;
 }};
 export type Value=Facet|Facet[];
-export interface DieDraw { die: string; dieIndex: number; face: Facet; kind: 'initial'|'reroll'|'explosion'; nodeSpan?:{start:number;end:number}; facetIndex?:number; exploded?:boolean; explosionNumber?:number }
+export interface DieDraw { die: string; dieIndex: number; face: Facet; kind: 'initial'|'reroll'|'explosion'; nodeSpan?:{start:number;end:number}; facetIndex?:number; exploded?:boolean; explosionNumber?:number; rerolled?:boolean }
 export interface Evaluation {value:Value;trace:string[];stages:string[];stageDice?:string[];stageDrawIndices?:number[][];interpretation?:string;dice?:DieDraw[]}
 type Context='scalar'|'pool-source';
 /** One budget follows the entire roll, including dynamic parameters and nested facets. */
@@ -66,6 +66,8 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       if(!faceCount)throw new ExpressionError('A die must have at least one facet');
       const chooseIndex=()=>{const forced=budget.options?.dieOverride?.({node,faceCount});if(forced===undefined)return rng.integer(faceCount);if(!Number.isInteger(forced)||forced<0||forced>=faceCount)throw new ExpressionError('Override value is not a legal die face');return forced;};
       const results:Facet[]=[];const trace=[...quantity.trace,...(sides?.trace??[])];
+      const initialFaces:Facet[]=[];const initialDrawIndices:number[]=[];const rerollBatches:Array<{faces:Facet[];drawIndices:number[]}>=[];
+      const recordReroll=(attempt:number,face:Facet,index:number)=>{const batch=rerollBatches[attempt]??={faces:[],drawIndices:[]};batch.faces.push(face);batch.drawIndices.push(index);};
       // Select all initial custom facets before evaluating their expressions.
       // This makes each facet's nested rolls visible in left-to-right order.
       const customFacets=node.die.kind==='custom-die'?node.die.facets:undefined;
@@ -75,6 +77,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
       const continuationDie=formatShort({...node,quantity:{kind:'literal',value:1,span:node.quantity.span}});
       const unitDie=formatShort({...node,quantity:{kind:'literal',value:1,span:node.quantity.span},die:node.die.kind==='standard-die'?{...node.die,explodeHighest:undefined}:{...node.die,facets:node.die.facets.map(facet=>({...facet,explosion:undefined}))}});
       const explodingTerm=node.die.kind==='standard-die'?Boolean(node.die.explodeHighest):node.die.facets.some(facet=>Boolean(facet.explosion));
+      const rerollableTerm=Boolean(node.reroll||node.die.kind==='standard-die'&&node.die.rerollLowest||node.die.kind==='custom-die'&&node.die.facets.some(facet=>Boolean(facet.facetReroll)));
       const progress=(current:string,completed:Facet[])=>count===1?current:`[${[...completed.map(String),current,...Array.from({length:count-completed.length-1},()=>continuationDie)].join(', ')}]`;
       const marked=(face:Facet,bang=false)=>count===1?`[${String(face)}${bang?'!':''}]`:`${String(face)}${bang?'!':''}`;
       let drawKind:DieDraw['kind']='initial', dieIndex=0;
@@ -102,10 +105,11 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
         const firstDieDraw=budget.dice.length;
         dieIndex=i;drawKind='initial';
         let drawn=draw(selected?.[i]),face=drawn.value;trace.push(`die ${i+1} → ${face}`);
+        initialFaces.push(face);initialDrawIndices.push(budget.dice.length-1);
         if(node.reroll){
           const {once,comparator,target}=node.reroll;
           const matches=(v:Facet)=>{const x=number(v);return comparator==='='?x===target:comparator==='<'?x<target:comparator==='<='?x<=target:comparator==='>'?x>target:x>=target;};
-          let tries=0;while(matches(face)){if(++tries>100)throw new ExpressionError('Reroll limit reached');drawKind='reroll';drawn=draw();face=drawn.value;trace.push(`reroll → ${face}`);if(once)break;}
+          let tries=0;while(matches(face)){if(++tries>100)throw new ExpressionError('Reroll limit reached');budget.dice[budget.dice.length-1].rerolled=true;drawKind='reroll';drawn=draw();face=drawn.value;recordReroll(tries-1,face,budget.dice.length-1);trace.push(`reroll → ${face}`);if(once)break;}
         }
         const settleFacetRerolls=()=>{
           const rerollCounts=new Map<number,number>();let rerolls=0;
@@ -113,7 +117,7 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
             const used=rerollCounts.get(drawn.index)??0,limit=drawn.facetReroll.limit;
             if(limit!==undefined&&used>=limit)break;
             if(++rerolls>100)throw new ExpressionError('Reroll safety limit reached');
-            rerollCounts.set(drawn.index,used+1);drawKind='reroll';drawn=draw();face=drawn.value;trace.push(`reroll → ${face}`);
+            rerollCounts.set(drawn.index,used+1);budget.dice[budget.dice.length-1].rerolled=true;drawKind='reroll';drawn=draw();face=drawn.value;recordReroll(rerolls-1,face,budget.dice.length-1);trace.push(`reroll → ${face}`);
           }
         };
         settleFacetRerolls();
@@ -137,11 +141,21 @@ function evaluateNodeInner(node:Node,rng:Rng,context:Context,plan:SemanticPlan,p
           presentation.replace(node,progress(String(face),results));presentation.show();
         }
         results.push(value);
-        if(selectedLabels&&showStages&&!explodingTerm){selectedLabels[i]=String(value);presentation.replace(node,show(selectedLabels));if(!budget.dice.slice(firstDieDraw).some(draw=>draw.kind==='explosion'))presentation.show(customFacets![selected![i]].kind==='expression'?formatFacetShort(customFacets![selected![i]]):'');}
+        if(selectedLabels&&showStages&&!explodingTerm&&!rerollableTerm){selectedLabels[i]=String(value);presentation.replace(node,show(selectedLabels));if(!budget.dice.slice(firstDieDraw).some(draw=>draw.kind==='explosion'))presentation.show(customFacets![selected![i]].kind==='expression'?formatFacetShort(customFacets![selected![i]]):'');}
+      }
+      if(rerollBatches.length&&showStages){
+        const initial=initialFaces.map((value,index)=>budget.dice[initialDrawIndices[index]]?.rerolled?`${value}r${node.die.kind==='custom-die'?node.die.facets.find(facet=>facet.kind==='value'&&facet.value===value)?.facetReroll?.limit??'':node.die.rerollLowest?.limit??''}`:value);
+        presentation.replace(node,show(initial));presentation.show(formatShort(node),initialDrawIndices);
+        const remaining=(reroll:Explosion|undefined,attempt:number)=>reroll?.limit===undefined?reroll:reroll.limit<=attempt?undefined:{...reroll,limit:reroll.limit-attempt};
+        rerollBatches.forEach((batch,attempt)=>{
+          const rerollDie={...node,quantity:{kind:'literal' as const,value:batch.faces.length,span:node.quantity.span},die:node.die.kind==='standard-die'?{...node.die,rerollLowest:remaining(node.die.rerollLowest,attempt+1)}:{...node.die,facets:node.die.facets.map(facet=>facet.facetReroll?{...facet,facetReroll:remaining(facet.facetReroll,attempt+1)}:facet)}};
+          presentation.replace(node,show(batch.faces));presentation.show(formatShort(rerollDie),batch.drawIndices);
+        });
+        presentation.replace(node,show(results));
       }
       trace.push(`${formatShort(node)} → ${show(results)}`);
       const resolution=plan.modeFor(node);
-      presentation.replace(node,show(results));if(showStages&&!operand&&!explodingTerm)presentation.show(formatShort(node),Array.from({length:budget.dice.length-firstDraw},(_,i)=>firstDraw+i));
+      presentation.replace(node,show(results));if(showStages&&!operand&&!explodingTerm)presentation.show(rerollBatches.length?'':formatShort(node),rerollBatches.length?[]:Array.from({length:budget.dice.length-firstDraw},(_,i)=>firstDraw+i));
       if(resolution==='pool')return {value:results,trace,stages:presentation.stages};
       if(results.every(v=>typeof v==='number')){const value=results.reduce<number>((a,b)=>a+(b as number),0);presentation.replace(node,String(value));if(showStages)presentation.show(operand?formatShort(node):'');return {value,trace:[...trace,`sum → ${value}`],stages:presentation.stages};}
       if(node.resolution==='sum')throw new ExpressionError('Symbolic dice cannot be summed');

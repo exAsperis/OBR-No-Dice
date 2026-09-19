@@ -30,6 +30,11 @@ describe('work draw badges', () => {
     expect(html).toContain('>6</span>');
     expect(html).toContain('>5</span>');
   });
+  it('marks discarded reroll draws with a slash', () => {
+    const result={resolution:{dice:[{die:'d4r',dieIndex:0,face:1,kind:'initial' as const,rerolled:true},{die:'d4r',dieIndex:0,face:3,kind:'reroll' as const}]}} as RollResult;
+    const html=renderToStaticMarkup(<WorkDraws result={result} indices={[0,1]} moments={[]}/>);
+    expect(html).toContain('work-draw-rerolled');
+  });
   it('does not let streak rarity style an individual die badge', () => {
     const result={resolution:{dice:[{die:'d20',dieIndex:0,face:20,kind:'initial' as const}]}} as RollResult;
     const streak={type:'streak-rarity' as const,tier:'legendary' as const,probability:.0001,label:'Streak'};
