@@ -26,7 +26,7 @@ export function reductionDiff(previous: string, next: string) {
   };
 }
 
-export const REVEAL_LINE_INTERVAL_MS = 500;
+export const REVEAL_LINE_INTERVAL_MS = 700;
 export const nextRevealCount = (current: number, total: number) => Math.min(total, current + 1);
 
 export function revealLines(result: RollResult): RevealLine[] {

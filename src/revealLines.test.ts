@@ -29,7 +29,7 @@ describe('roll reveal lines', () => {
     expect(revealLines({ ...base, expression: '2d6 # Attack' }).at(-1)?.text).toBe('Attack: 6');
   });
   it('advances exactly one line per one-second timer tick', () => {
-    expect(REVEAL_LINE_INTERVAL_MS).toBe(500);
+    expect(REVEAL_LINE_INTERVAL_MS).toBe(700);
     expect([1,2,3].map(count=>nextRevealCount(count,3))).toEqual([2,3,3]);
   });
   it('isolates changing terms while retaining surrounding expression text', () => {
