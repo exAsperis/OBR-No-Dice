@@ -160,8 +160,7 @@ function Reveal() {
     const timer = window.setInterval(() => {
       const pauseKey=`${result.requestId}:${shown}`;
       const line=lines[shown-1];
-      const rareDie=Boolean(line?.drawIndices?.some(index=>dieMoments.some(moment=>moment.drawIndex===index)));
-      if(!reducedMotion&&(revealLineExploded(line,result)||rareDie)&&!pausedExplosionFrames.current.has(pauseKey)){
+      if(!reducedMotion&&revealLineExploded(line,result)&&!pausedExplosionFrames.current.has(pauseKey)){
         pausedExplosionFrames.current.add(pauseKey);
         return;
       }
