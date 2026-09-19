@@ -85,6 +85,22 @@ describe('No Dice public API v1', () => {
     expect(responses.every(response => response.ok)).toBe(true);
   });
 
+  it('serializes distinct requests FIFO, shares duplicates, and continues after failure',async()=>{
+    const events:string[]=[];const responses:NoDiceRollResponseV1[]=[];
+    const gates=new Map(['A','B','C'].map(id=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done;});return [id,{promise,resolve}] as const;}));
+    const handle=createNoDiceApiHandler({
+      roll:async(expression,id)=>{events.push(`roll:${id}`);if(id==='bad')throw new Error('bad roll');await gates.get(id)?.promise;return complete(expression,id,[0]);},
+      record:async completed=>{events.push(`stored:${completed.record.requestId}`);},
+      respond:async response=>{responses.push(response);},
+    });
+    const pending=[handle(request('A','d1')),handle(request('B','d1')),handle(request('B','d1')),handle(request('bad','d1')),handle(request('C','d1'))];
+    await vi.waitFor(()=>expect(events).toEqual(['roll:A']));gates.get('A')!.resolve();
+    await vi.waitFor(()=>expect(events).toEqual(['roll:A','stored:A','roll:B']));gates.get('B')!.resolve();
+    await vi.waitFor(()=>expect(events).toContain('roll:C'));gates.get('C')!.resolve();await Promise.all(pending);
+    expect(events).toEqual(['roll:A','stored:A','roll:B','stored:B','roll:bad','roll:C','stored:C']);
+    expect(responses.map(item=>item.requestId)).toEqual(['A','B','B','bad','C']);
+  });
+
   it('rejects oversized response data before recording or broadcasting a roll', async () => {
     const responses: NoDiceRollResponseV1[] = [];
     const record = vi.fn(async () => {});

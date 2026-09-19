@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import 'fake-indexeddb/auto';
 import { PANEL_CHANNEL, PANEL_POPOVER_ID } from './panelProtocol';
 import { EXTENSION_ID } from './constants';
 import { LOCAL_CHANNEL } from './revealProtocol';
@@ -69,11 +70,17 @@ describe('background main panel', () => {
     expect(loadRevealPosition('player')).toEqual({ left: 594, top: 324 });
     reveal.onmessage?.({ data: { type: 'ready', roomId: 'room', playerId: 'player' } });
     expect(reveal.sent).toContainEqual(expect.objectContaining({ type: 'show', resume: { visibleCount: 3, highlighted: true, dismissDeadline: 10000 } }));
+    const glass=(reveal.sent.find(message=>(message as {type?:string;result?:{requestId?:string}}).type==='show'&&(message as {result?:{requestId?:string}}).result?.requestId==='glass') as {result:object}).result;
+    reveal.onmessage?.({data:{type:'revealed',roomId:'room',playerId:'player',result:glass}});
+    await vi.waitFor(()=>expect(reveal.sent).toContainEqual(expect.objectContaining({type:'stored',requestId:'glass'})));
     state.width = 700;
     state.height = 500;
     reveal.onmessage?.({ data: { type: 'result', roomId: 'room', playerId: 'player', result: { version: 1, requestId: 'glass2', expression: 'd1', dialect: 'nodice', visibility: 'self', playerId: 'player', playerName: 'Player', value: 1, trace: [], time: 2 } } });
     await vi.waitFor(() => expect(state.opened).toHaveLength(6));
     expect(state.opened[5].anchorPosition).toEqual({ left: 294, top: 124 });
+    const glass2=(reveal.sent.find(message=>(message as {type?:string;result?:{requestId?:string}}).type==='show'&&(message as {result?:{requestId?:string}}).result?.requestId==='glass2') as {result:object}).result;
+    reveal.onmessage?.({data:{type:'revealed',roomId:'room',playerId:'player',result:glass2}});
+    await vi.waitFor(()=>expect(reveal.sent).toContainEqual(expect.objectContaining({type:'stored',requestId:'glass2'})));
     reveal.onmessage?.({ data: { type: 'reroll', roomId: 'room', playerId: 'player', requestId: 'glass2' } });
     await vi.waitFor(() => expect(reveal.sent).toContainEqual(expect.objectContaining({ type: 'reroll-started', roomId: 'room', playerId: 'player' })));
     const started = reveal.sent.find(message => (message as { type?: string }).type === 'reroll-started') as { requestId: string };

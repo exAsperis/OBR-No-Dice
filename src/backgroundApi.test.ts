@@ -32,8 +32,9 @@ describe('background API registration', () => {
     class LocalChannel {
       static instances: LocalChannel[] = [];
       onmessage: ((event: { data: unknown }) => void) | null = null;
+      sent: unknown[]=[];
       constructor(readonly name: string) { LocalChannel.instances.push(this); }
-      postMessage(_message: unknown) {}
+      postMessage(message: unknown) {this.sent.push(message);}
     }
     vi.stubGlobal('BroadcastChannel', LocalChannel);
     await import('./background');
@@ -46,12 +47,15 @@ describe('background API registration', () => {
     expect(response.data).toMatchObject({ ok: true, requestId: 'background', result: { kind: 'number', value: 1 } });
     expect(state.sent).toHaveLength(1);
     listener({ data: { protocolVersion: 1, type: 'roll', requestId: 'recorded', expression: 'd1' }, connectionId: 'local' });
-    await vi.waitFor(() => expect(state.sent.filter(item => item.channel === NO_DICE_API_RESPONSE)).toHaveLength(2));
-    expect(state.sent.find(item => item.channel === RESULT_CHANNEL)).toMatchObject({ options: { destination: 'ALL' } });
+    await vi.waitFor(() => expect(state.sent.find(item => item.channel === RESULT_CHANNEL)).toMatchObject({ options: { destination: 'ALL' } }));
+    expect(state.sent.filter(item => item.channel === NO_DICE_API_RESPONSE)).toHaveLength(1);
     expect((await getRecentRolls('room', 'player')).map(item => item.requestId)).not.toContain('recorded');
     const recorded = state.sent.find(item => item.channel === RESULT_CHANNEL)!.data as RollResult;
-    LocalChannel.instances.find(item => item.name === LOCAL_CHANNEL)!.onmessage?.({ data: { type: 'revealed', roomId: 'room', playerId: 'player', result: recorded } });
+    const local=LocalChannel.instances.find(item => item.name === LOCAL_CHANNEL)!;
+    local.onmessage?.({ data: { type: 'revealed', roomId: 'room', playerId: 'player', result: recorded } });
     await vi.waitFor(async () => expect((await getRecentRolls('room', 'player')).map(item => item.requestId)).toContain('recorded'));
+    expect(local.sent).toContainEqual(expect.objectContaining({type:'stored',requestId:'recorded'}));
+    await vi.waitFor(() => expect(state.sent.filter(item => item.channel === NO_DICE_API_RESPONSE)).toHaveLength(2));
     state.metadata=overrideMetadata(overrideTransition({[ROOM_SETTINGS_KEY]:DEFAULT_ROOM_SETTINGS,[SESSION_KEY]:{id:'real',name:'Game',startedAt:1}},[{die:'d20',value:20}],true));
     listener({data:{protocolVersion:1,type:'roll',requestId:'forced',expression:'d20',options:{record:false}},connectionId:'local'});
     await vi.waitFor(()=>expect(state.sent.some(item=>item.channel===NO_DICE_API_RESPONSE&&(item.data as {requestId?:string}).requestId==='forced')).toBe(true));

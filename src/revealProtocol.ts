@@ -7,6 +7,10 @@ export type LocalMessage =
   | { type: 'result'; roomId: string; playerId: string; result: RollResult }
   | { type: 'show'; roomId: string; playerId: string; result: RollResult; resume?: { visibleCount: number; highlighted: boolean; dismissDeadline?: number } }
   | { type: 'revealed'; roomId: string; playerId: string; result: RollResult }
+  | { type: 'stored'; roomId: string; playerId: string; requestId: string }
+  | { type: 'storage-error'; roomId: string; playerId: string; requestId: string; message: string }
+  | { type: 'presentation-state'; roomId: string; playerId: string; busy: boolean; requestId?: string }
+  | { type: 'presentation-state-request'; roomId: string; playerId: string }
   | { type: 'ready'; roomId: string; playerId: string }
   | { type: 'dismiss'; roomId: string; playerId: string }
   | { type: 'reroll'; roomId: string; playerId: string; requestId: string }

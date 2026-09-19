@@ -16,6 +16,7 @@ import { VERIFY_LOCAL_CHANNEL, type VerificationLocalMessage } from './verificat
 import { readRoomSettings } from './roomSettings';
 import { SeededRng } from './verificationCrypto';
 import { MAX_ROLL_STEPS } from './engine/evaluate';
+import { PresentationQueue } from './presentationQueue';
 
 OBR.onReady(async () => {
   const roomId = OBR.room.id;
@@ -43,7 +44,6 @@ OBR.onReady(async () => {
   };
   const local = new BroadcastChannel(LOCAL_CHANNEL);
   const ledgerEvents = new BroadcastChannel(LEDGER_CHANNEL);
-  const seen = new Set<string>();
   let current: RollResult | null = null;
   let popoverOpen = false;
   let opening = false;
@@ -195,6 +195,8 @@ OBR.onReady(async () => {
   }
 
   const send = (message: LocalMessage) => local.postMessage(message);
+  const storedRequestIds=new Set<string>();
+  const storingRequestIds=new Set<string>();
   const revealSize = (bounds: { width: number; height: number }) => ({
     width: Math.min(390, Math.max(280, bounds.width - 32)),
     height: Math.min(360, Math.max(220, bounds.height - 32)),
@@ -238,10 +240,7 @@ OBR.onReady(async () => {
   };
   window.addEventListener('resize', () => { void ensureRevealOnScreen(); });
   window.setInterval(() => { void ensureRevealOnScreen(); }, 5_000);
-  const present = (result: RollResult) => {
-    if (seen.has(result.requestId)) return;
-    seen.add(result.requestId);
-    if (seen.size > 200) seen.delete(seen.values().next().value!);
+  const showPresentation = (result: RollResult) => {
     current = result;
     revealResume = null;
     if (popoverOpen) {
@@ -250,20 +249,27 @@ OBR.onReady(async () => {
     }
     else void open();
   };
+  const presentations=new PresentationQueue<RollResult>(showPresentation,(busy,requestId)=>send({type:'presentation-state',roomId,playerId,busy,...(requestId?{requestId}:{})}));
+  const present = (result: RollResult) => presentations.enqueue(result);
 
   local.onmessage = (event: MessageEvent<unknown>) => {
     if (!isLocalMessage(event.data)) return;
     const message = event.data;
     if (message.roomId !== roomId || message.playerId !== playerId) return;
-    if (message.type === 'result' && isResult(message.result)) present(message.result);
+    if (message.type === 'result' && isResult(message.result)) void present(message.result).catch(()=>{});
+    if(message.type==='presentation-state-request')send({type:'presentation-state',roomId,playerId,busy:presentations.busy,...(presentations.active?{requestId:presentations.active.requestId}:{})});
     if (message.type === 'ready' && current) {
       send({ type: 'show', roomId, playerId, result: current, resume: revealResume ?? undefined });
+      if(storedRequestIds.has(current.requestId))send({type:'stored',roomId,playerId,requestId:current.requestId});
       revealResume = null;
     }
     if (message.type === 'revealed' && isResult(message.result)) {
-      void migration.then(async()=>{const snapshot=await roomSnapshot();await appendRoll(roomId,playerId,message.result,snapshot.session,snapshot.previous);ledgerEvents.postMessage({roomId,playerId});}).catch(()=>{});
+      if(presentations.active?.requestId!==message.result.requestId||storingRequestIds.has(message.result.requestId))return;
+      storingRequestIds.add(message.result.requestId);
+      void migration.then(async()=>{const snapshot=await roomSnapshot();await appendRoll(roomId,playerId,message.result,snapshot.session,snapshot.previous);ledgerEvents.postMessage({roomId,playerId});storedRequestIds.add(message.result.requestId);send({type:'stored',roomId,playerId,requestId:message.result.requestId});presentations.complete(message.result.requestId);}).catch(error=>{const detail=error instanceof Error?error.message:'Could not store roll';send({type:'storage-error',roomId,playerId,requestId:message.result.requestId,message:detail});presentations.fail(message.result.requestId,error);}).finally(()=>storingRequestIds.delete(message.result.requestId));
     }
     if (message.type === 'dismiss') {
+      if(current&&!storedRequestIds.has(current.requestId))return;
       current = null;
       popoverOpen = false;
       void OBR.popover.close(REVEAL_POPOVER_ID);
@@ -275,7 +281,7 @@ OBR.onReady(async () => {
       revealPosition = { left: (revealPosition?.left ?? 0) + message.dx, top: (revealPosition?.top ?? 0) + message.dy };
       void open(true);
     }
-    if (message.type === 'reroll' && current?.requestId === message.requestId && !rerolling) {
+    if (message.type === 'reroll' && current?.requestId === message.requestId && storedRequestIds.has(message.requestId) && !rerolling) {
       const original = current;
       const requestId = crypto.randomUUID();
       rerolling = true;
@@ -301,7 +307,7 @@ OBR.onReady(async () => {
           if(latest.session?.id!==snapshot.session?.id||Boolean(latest.settings.overrideMode?.enabled)!==overridden)throw new Error('Room mode changed during the roll. Try again.');
           if (record.visibility === 'everyone') await OBR.broadcast.sendMessage(RESULT_CHANNEL, record);
           if (record.visibility === 'gm' && role !== 'GM') await OBR.broadcast.sendMessage(GM_CHANNEL, await encryptForGm(record));
-          present(record);
+          await present(record);
         } catch (error) {
           send({ type: 'reroll-error', roomId, playerId, requestId, message: error instanceof Error ? error.message : 'Reroll failed' });
         } finally { rerolling = false; }
@@ -310,7 +316,7 @@ OBR.onReady(async () => {
   };
 
   OBR.broadcast.onMessage(RESULT_CHANNEL, event => {
-    if (isResult(event.data) && event.data.visibility === 'everyone') present(event.data);
+    if (isResult(event.data) && event.data.visibility === 'everyone') void present(event.data).catch(()=>{});
   });
   OBR.broadcast.onMessage(GM_CHANNEL, event => {
     if (role !== 'GM' || !gmKey) return;
@@ -318,11 +324,12 @@ OBR.onReady(async () => {
     if (payload?.version !== 1 || typeof payload.ciphertext !== 'string') return;
     void decryptForGm(payload, gmKey).then(result => {
       if (!isResult(result) || result.visibility !== 'gm') return;
-      if (!popoverOpen) send({ type: 'show', roomId, playerId, result });
-      present(result);
+      void present(result).catch(()=>{});
     }).catch(() => {});
   });
   const handleApiRequest = createNoDiceApiHandler({
+    acquire:requestId=>presentations.reserve(requestId),
+    release:requestId=>presentations.release(requestId),
     roll: async (expression, requestId, label) => {const snapshot=await roomSnapshot(),overridden=snapshot.settings.overrideMode?.enabled===true;return rollExpression({
       requestId, expression, visibility: 'everyone', playerId,
       playerName: await OBR.player.getName(), label, source: 'external-api',overridden,
@@ -340,7 +347,7 @@ OBR.onReady(async () => {
       }
       if (size() > MAX_API_BROADCAST_BYTES) throw new Error('Roll record is too large for an Owlbear broadcast');
       await OBR.broadcast.sendMessage(RESULT_CHANNEL, record, { destination: 'ALL' });
-      present(record);
+      const stored=present(record);presentations.release(record.requestId);await stored;
     },
     respond: response => OBR.broadcast.sendMessage(NO_DICE_API_RESPONSE, response, { destination: 'LOCAL' }),
   });

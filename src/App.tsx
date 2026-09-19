@@ -28,6 +28,7 @@ import { resizeExpressionEditor } from './expressionEditor';
 import { ledgerWorkRows } from './ledgerWork';
 import { WorkDieCell } from './WorkDraws';
 import { chartBarTooltip, displayedRolls, inclusiveTails } from './rollPresentation';
+import { canSubmitRoll } from './rollLifecycle';
 import type { RollMoment } from './rollMoments';
 import './statistics.css';
 
@@ -63,6 +64,7 @@ export default function App() {
   const [selected,setSelected]=useState<RollResult|null>(null);
   const [chartRolls,setChartRolls]=useState<Value[]>([]);
   const [busy,setBusy]=useState(false);
+  const [presentationBusy,setPresentationBusy]=useState(false);
   const [rollingRequestId,setRollingRequestId]=useState<string|null>(null);
   const [roomSettings,setRoomSettings]=useState<RoomSettings>(DEFAULT_ROOM_SETTINGS);
   const overrideSignature=JSON.stringify({enabled:roomSettings.overrideMode?.enabled??false,overrides:roomSettings.overrideMode?.overrides??[]});
@@ -216,6 +218,7 @@ export default function App() {
     const channel=new BroadcastChannel(LOCAL_CHANNEL);revealChannel.current=channel;
     channel.onmessage=(event:MessageEvent<unknown>)=>{
       if(!isLocalMessage(event.data)||event.data.roomId!==obr.roomId||event.data.playerId!==obr.playerId)return;
+      if(event.data.type==='presentation-state'){setPresentationBusy(event.data.busy);return;}
       if(event.data.type==='reroll-started'){
         rememberRecentCardHeight();
         setRollingRequestId(event.data.requestId);
@@ -231,10 +234,13 @@ export default function App() {
       if(event.data.type==='revealed'&&isResult(event.data.result)){
         const result=event.data.result;
         add(result);
-        setRollingRequestId(current=>current===result.requestId?null:current);
-        if(pendingLocalRolls.current.delete(result.requestId)){setSelected(result);setInputError('');}
+        if(pendingLocalRolls.current.has(result.requestId)){setSelected(result);setInputError('');}
+        return;
       }
+      if(event.data.type==='stored'){const requestId=event.data.requestId;setRollingRequestId(current=>current===requestId?null:current);pendingLocalRolls.current.delete(requestId);return;}
+      if(event.data.type==='storage-error'){const {requestId,message}=event.data;setRollingRequestId(current=>current===requestId?null:current);pendingLocalRolls.current.delete(requestId);setInputError(message);}
     };
+    channel.postMessage({type:'presentation-state-request',roomId:obr.roomId,playerId:obr.playerId} satisfies LocalMessage);
     return ()=>{channel.close();revealChannel.current=null;};
   // The listener uses refs and functional state updates to process current results.
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -320,7 +326,7 @@ export default function App() {
     }
     finally {setBusy(false);}
   }
-  function submit() { if(busy||!expression.trim())return;rememberRecentCardHeight();const requestId=crypto.randomUUID();setRollingRequestId(requestId);void perform({version:1,requestId,expression,dialect:dialectHint,visibility},true); }
+  function submit() { if(!canSubmitRoll(expression,busy||rollingRequestId!==null,presentationBusy))return;rememberRecentCardHeight();const requestId=crypto.randomUUID();setRollingRequestId(requestId);void perform({version:1,requestId,expression,dialect:dialectHint,visibility},true); }
   function useShortcut(term:string,requestId:string) {
     const next=applyDiceShortcutOnce(currentInput.current.expression,term,requestId,seenShortcutIds.current);
     if(next===null)return;
@@ -404,7 +410,7 @@ export default function App() {
     </section>
     <form className={`composer${roomSettings.verifiableRollsEnabled&&verifiableRollsAvailable?' verifiable-available':''}${roomSettings.overrideMode?.enabled?' override-active':''}`} onSubmit={e=>{e.preventDefault();submit();}}>
       <div className="composer-heading"><label htmlFor="expression">Expression</label>{notation&&<NotationPopover expression={expression} notation={notation}/>}</div>
-      <div className="expression-row"><div className={`expression-field${expression?' has-expression':''}`}><textarea id="expression" ref={inputRef} rows={1} autoComplete="off" spellCheck={false} value={expression} onChange={e=>{currentInput.current.expression=e.target.value;setExpression(e.target.value);setDialectHint(undefined);setSelected(null);setInputError('');}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();if(!busy&&expression.trim())submit();}}} placeholder="Enter expression" title="Enter to roll; Shift+Enter for a new line" aria-describedby={inputError||chartError?'input-error':undefined}/><button type="button" className="clear-expression" disabled={!expression} onClick={()=>{currentInput.current.expression='';setExpression('');setDialectHint(undefined);setSelected(null);setInputError('');inputRef.current?.focus();}} aria-label="Clear expression">Clear</button></div><select aria-label="Roll audience" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">All</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" className="roll-button" disabled={busy||!expression.trim()}>Roll</button></div>
+      <div className="expression-row"><div className={`expression-field${expression?' has-expression':''}`}><textarea id="expression" ref={inputRef} rows={1} autoComplete="off" spellCheck={false} value={expression} onChange={e=>{currentInput.current.expression=e.target.value;setExpression(e.target.value);setDialectHint(undefined);setSelected(null);setInputError('');}} onKeyDown={e=>{if(e.key==='Enter'&&!e.shiftKey&&!e.nativeEvent.isComposing){e.preventDefault();if(canSubmitRoll(expression,busy||rollingRequestId!==null,presentationBusy))submit();}}} placeholder="Enter expression" title="Enter to roll; Shift+Enter for a new line" aria-describedby={inputError||chartError?'input-error':undefined}/><button type="button" className="clear-expression" disabled={!expression} onClick={()=>{currentInput.current.expression='';setExpression('');setDialectHint(undefined);setSelected(null);setInputError('');inputRef.current?.focus();}} aria-label="Clear expression">Clear</button></div><select aria-label="Roll audience" value={visibility} onChange={e=>setVisibility(e.target.value as Visibility)}><option value="everyone">All</option><option value="self">Self</option><option value="gm">GM</option></select><button type="submit" className="roll-button" disabled={!canSubmitRoll(expression,busy||rollingRequestId!==null,presentationBusy)}>Roll</button></div>
       {inputError&&<div id="input-error" className="input-error" role="alert">{inputError}</div>}
       {!inputError&&chartError&&<div id="input-error" className="input-error" role="status">{chartError}</div>}
     </form>

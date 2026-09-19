@@ -8,22 +8,27 @@ export interface ApiHandlerDependencies {
   roll(expression: string, requestId: string, label?: string): CompletedRoll | Promise<CompletedRoll>;
   record(completed: CompletedRoll): Promise<void>;
   respond(response: NoDiceRollResponseV1): Promise<void>;
+  acquire?(requestId:string):Promise<void>;
+  release?(requestId:string):void;
 }
 
 /** One background-owned handler; duplicate request IDs share a single roll. */
 export function createNoDiceApiHandler(dependencies: ApiHandlerDependencies) {
   const pending = new Map<string, Promise<NoDiceRollResponseV1>>();
+  let fifo:Promise<void>=Promise.resolve();
   return async (data: unknown): Promise<void> => {
     const requestId = usableRequestId(data);
     if (requestId === null) return;
     let response = pending.get(requestId);
     if (!response) {
-      response = (async (): Promise<NoDiceRollResponseV1> => {
+      const run = async (): Promise<NoDiceRollResponseV1> => {
         if (typeof data === 'object' && data !== null && 'protocolVersion' in data && data.protocolVersion !== 1)
           return errorResponse(requestId, 'UNSUPPORTED_VERSION', 'No Dice API protocol version 1 is required');
         if (!isNoDiceRollRequestV1(data))
           return errorResponse(requestId, 'INVALID_REQUEST', 'Expected a roll request with a non-empty expression of at most 1,000 characters');
+        let acquired=false;
         try {
+          await dependencies.acquire?.(requestId);acquired=true;
           const completed = await dependencies.roll(data.expression, requestId, data.options?.label);
           const success = successResponse(requestId, completed);
           if (new TextEncoder().encode(JSON.stringify(success)).length > MAX_API_BROADCAST_BYTES)
@@ -31,7 +36,10 @@ export function createNoDiceApiHandler(dependencies: ApiHandlerDependencies) {
           if (data.options?.record !== false) await dependencies.record(completed);
           return success;
         } catch (error) { return rollErrorResponse(requestId, error); }
-      })();
+        finally {if(acquired)dependencies.release?.(requestId);}
+      };
+      response=fifo.then(run,run);
+      fifo=response.then(()=>undefined,()=>undefined);
       pending.set(requestId, response);
       if (pending.size > 200) pending.delete(pending.keys().next().value!);
     }
