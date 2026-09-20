@@ -3,7 +3,7 @@ export const STATISTICS_HELP = {
   expressionRegex: 'A regular expression, or regex, is a text-matching pattern. Here it filters expressions by their normalized dice formula. For example, ^d20 matches d20 and d20+5.',
   result: 'The final value produced after the entire dice expression is evaluated. It is different from an individual die face rolled along the way.',
   rollFilter: 'Checks individual die draws inside a roll record, including rerolls and explosion draws. A matching die draw causes the whole roll record to match.',
-  rollDie: 'Restricts the Roll filter to individual draws of this die type.',
+  rollDie: 'Restricts the Roll filter to individual draws of this die type, such as d20. Leave it blank to match any die.',
   interpretationCategory: 'A text label assigned by an interpretation rule, such as Fail, Partial Success, or Success.',
   aggregate: 'How matching results are combined in a custom player statistic: Count, Sum, or Average.',
   mean: 'The arithmetic average: add the numeric values and divide by how many values there are.',

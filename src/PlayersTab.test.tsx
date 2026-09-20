@@ -7,10 +7,16 @@ import { rollExpression } from './rollService';
 
 let id=0;
 const roll=(expression:string,player:string,faces:number[],time=0):StoredRoll=>{let index=0;const result=rollExpression({requestId:`players-${++id}`,expression,visibility:'everyone',playerId:player,playerName:player},{integer:max=>(faces[index++]??0)%max}).record;return {id:result.requestId,sessionId:'s',timestamp:time,rollerId:player,rollerName:player,expression,normalizedExpression:normalizeExpression(result),finalResult:result.value,resolution:result.resolution!,visibility:result.visibility,result};};
-const saved=(id:string,name:string,aggregate:SavedPlayerStatistic['aggregate'],extra:Partial<SavedPlayerStatistic>={}):SavedPlayerStatistic=>({id,name,aggregate,pattern:'',resultComparison:'any',resultValue:6,rollComparison:'any',rollValue:20,rollDie:'',category:'',from:'',until:'',...extra});
+const saved=(id:string,name:string,aggregate:SavedPlayerStatistic['aggregate'],extra:Partial<SavedPlayerStatistic>={}):SavedPlayerStatistic=>({id,name,aggregate,pattern:'',resultComparison:'any',resultValue:6,rollComparison:'any',rollValue:20,rollDie:'',...extra});
 beforeEach(()=>localStorage.clear());
 
 describe('PlayersTab',()=>{
+  it('shows four ordinary editable and deletable defaults for fresh storage',()=>{
+    render(<PlayersTab rolls={[roll('d20','Joe',[19])]} roomId="" viewerId="viewer"/>);
+    for(const name of ['Nat 20','Nat 1','PbtA Miss','PbtA Strong hit']){expect(screen.getByRole('row',{name:new RegExp(`${name} · Count`)})).toBeTruthy();expect(screen.getByRole('button',{name:`Edit ${name}`})).toBeTruthy();expect(screen.getByRole('button',{name:`Delete ${name}`})).toBeTruthy();}
+    fireEvent.click(screen.getByRole('button',{name:'Edit Nat 20'}));fireEvent.change(screen.getByLabelText('Name'),{target:{value:'Natural twenty'}});fireEvent.click(screen.getByRole('button',{name:'Save'}));expect(screen.getByRole('row',{name:/Natural twenty · Count/})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'Delete Nat 1'}));expect(screen.queryByRole('row',{name:/Nat 1 · Count/})).toBeNull();
+  });
   it('transposes players into colored headers with the six built-in rows',()=>{
     render(<PlayersTab rolls={[roll('d6','Joe',[0],1),roll('d20','Bill',[19],2)]} roomId="room" viewerId="viewer"/>);
     for(const player of ['Joe','Bill']){const header=screen.getByRole('columnheader',{name:player});expect(header.querySelector('.player-color-disk')).toBeTruthy();}
@@ -52,5 +58,13 @@ describe('PlayersTab',()=>{
     render(<PlayersTab rolls={[]} roomId="" viewerId="viewer"/>);fireEvent.click(screen.getByRole('button',{name:'Add statistic'}));fireEvent.click(screen.getByRole('button',{name:'Save'}));expect(screen.getByRole('alert').textContent).toMatch(/Name/);
     fireEvent.change(screen.getByLabelText('Name'),{target:{value:'Bad'}});fireEvent.change(screen.getByLabelText('Expression regex'),{target:{value:'['}});fireEvent.click(screen.getByRole('button',{name:'Save'}));expect(screen.getByRole('alert').textContent).toMatch(/regex/);
     fireEvent.change(screen.getByLabelText('Expression regex'),{target:{value:''}});fireEvent.change(screen.getByLabelText('Result'),{target:{value:'='}});fireEvent.change(screen.getByLabelText('Result value'),{target:{value:''}});fireEvent.click(screen.getByRole('button',{name:'Save'}));expect(screen.getByRole('alert').textContent).toMatch(/numeric/);
+  });
+
+  it('uses validated free text for Roll die without session-derived options',()=>{
+    render(<PlayersTab rolls={[roll('d6','Joe',[0])]} roomId="" viewerId="viewer"/>);fireEvent.click(screen.getByRole('button',{name:'Add statistic'}));fireEvent.change(screen.getByLabelText('Name'),{target:{value:'Future die'}});fireEvent.change(screen.getByLabelText('Roll'),{target:{value:'='}});
+    const die=screen.getByLabelText('Roll die');expect(die.tagName).toBe('INPUT');fireEvent.change(die,{target:{value:'d30'}});fireEvent.click(screen.getByRole('button',{name:'Save'}));expect(screen.getByRole('button',{name:'Edit Future die'})).toBeTruthy();
+    fireEvent.click(screen.getByRole('button',{name:'Edit Future die'}));fireEvent.change(screen.getByLabelText('Roll die'),{target:{value:'banana'}});fireEvent.click(screen.getByRole('button',{name:'Save'}));expect(screen.getByRole('alert').textContent).toMatch(/die type/);
+    fireEvent.change(screen.getByLabelText('Roll die'),{target:{value:'D20'}});fireEvent.click(screen.getByRole('button',{name:'Save'}));fireEvent.click(screen.getByRole('button',{name:'Edit Future die'}));expect((screen.getByLabelText('Roll die') as HTMLInputElement).value).toBe('d20');
+    expect(screen.queryByLabelText('Category')).toBeNull();expect(screen.queryByLabelText('From')).toBeNull();expect(screen.queryByLabelText('Until')).toBeNull();
   });
 });
