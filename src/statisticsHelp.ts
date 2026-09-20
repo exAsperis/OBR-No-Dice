@@ -58,6 +58,7 @@ export const STATISTICS_HELP = {
   approximate95PercentSampleRange: 'An approximate range of observed percentages this single outcome would commonly produce in repeated samples of this size if the theoretical model were used. It is not a pass/fail test, and with many outcomes some values may fall outside their ranges by chance.',
   cumulativeAveragePercentile: 'After each comparable roll, No Dice converts that result to a percentile within this expression, then averages it with all earlier comparable rolls. The chart shows how that running average changes over time. Over many random rolls it tends toward 50%.',
   expectedPositionMarker: 'The thin marker shows the exact expected percentage; the filled bar shows the observed percentage.',
+  includePrivateRolls: 'When off, Statistics uses only rolls addressed to Everyone so the GM and players can compare the same public dataset. When on, it also includes Self and GM-only rolls visible in your local ledger. Other viewers may have different private rolls.',
 } as const;
 
 export type StatisticsHelpKey = keyof typeof STATISTICS_HELP;

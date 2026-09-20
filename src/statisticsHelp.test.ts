@@ -62,6 +62,7 @@ const REQUIRED_KEYS = [
   'approximate95PercentSampleRange',
   'cumulativeAveragePercentile',
   'expectedPositionMarker',
+  'includePrivateRolls',
 ] as const;
 
 describe('statisticsHelp', () => {
