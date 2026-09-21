@@ -14,7 +14,7 @@ export const DICE_SHORTCUTS = [
   { label: 'd100', term: 'd100' },
   { label: '%', term: 'd{0..100}' },
   { label: 'PbtA', term: '2d{6} | 6-:Miss;7-9:Partial;10+:Hit' },
-  { label: '(8)', term: 'd{Outlook good,Cannot predict now,Reply hazy Try again,Don\'t count on it,Concentrate and ask again,Better not tell you now,It is certain,As I see it yes,Without a doubt,Yes Definitely,Yes,Signs point to yes}' }
+  { label: '(8)', term: 'd{Outlook good,Cannot predict now,Reply hazy Try again,Dont count on it,Concentrate and ask again,Better not tell you now,It is certain,As I see it yes,Without a doubt,Yes Definitely,Yes,Signs point to yes}' }
 ] as const;
 
 type DiceNode = Extract<Node, { kind: 'dice' }>;
