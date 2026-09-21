@@ -5,7 +5,7 @@ import { roll } from './engine/evaluate';
 
 describe('dice shortcuts',()=>{
   it('provides valid terms for every shortcut',()=>{
-    expect(DICE_SHORTCUTS.map(item=>item.label)).toEqual(['Coin','d4','d6','d8','d10','d12','d20','d100','%']);
+    expect(DICE_SHORTCUTS.map(item=>item.label)).toEqual(['Coin','d4','d6','d8','d10','d12','d20','d100','%','PbtA','(8)']);
     for(const shortcut of DICE_SHORTCUTS)expect(()=>parseAuto(shortcut.term),shortcut.label).not.toThrow();
   });
   it('inserts into an empty or existing expression',()=>{
