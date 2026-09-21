@@ -14,7 +14,7 @@ export const DICE_SHORTCUTS = [
   { label: 'd100', term: 'd100' },
   { label: '%', term: 'd{0..100}' },
   { label: 'PbtA', term: '2d6 | 6-:Miss;7-9:Partial;10+:Hit' },
-  { label: '(8)', term: 'd{It is certain, Reply hazy try again, Do not count on it, It is decidedly so, Ask again later, My reply is no, Without a doubt, Better not tell you now, My sources say no, Yes definitely, Cannot predict now, Outlook not so good, You may rely on it, Concentrate and ask again, Very doubtful, As I see it—yes, Most likely, Outlook good, Yes, Signs point to yes}' }
+  { label: '(8)', term: 'd{It is certain, Reply hazy try again, Do not count on it, It is decidedly so, Ask again later, My reply is no, Without a doubt, Better not tell you now, My sources say no, Yes definitely, Cannot predict now, Outlook not so good, You may rely on it, Concentrate and ask again, Very doubtful, As I see it Yes, Most likely, Outlook good, Yes, Signs point to yes}' }
 ] as const;
 
 type DiceNode = Extract<Node, { kind: 'dice' }>;
